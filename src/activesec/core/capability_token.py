@@ -26,7 +26,14 @@ class CapabilityCaveat:
 
     allowed_tools: FrozenSet[str]
     path_prefixes: Tuple[str, ...]
-    denied_paths: Tuple[str, ...] = (".git/hooks", ".env", ".ssh", "src/activesec")
+    denied_paths: Tuple[str, ...] = (
+        ".git/hooks",
+        ".env",
+        ".ssh",
+        "src/activesec",
+        "audit_vault",
+        ".audit.jsonl",
+    )
     allowed_binaries: FrozenSet[str] = frozenset()
     network_destinations: FrozenSet[str] = frozenset()
     max_calls: int = 10
@@ -379,6 +386,7 @@ class CapabilityEngine(SecureComponent):
                     if (
                         real_target.endswith(os.sep + normalized_denied)
                         or (os.sep + normalized_denied + os.sep) in (real_target + os.sep)
+                        or os.path.basename(real_target).endswith(normalized_denied)
                     ):
                         raise CapabilityViolationError(
                             f"Target path '{target_path}' matches protected denied path '{denied}'.",

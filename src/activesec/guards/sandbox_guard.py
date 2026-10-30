@@ -31,6 +31,8 @@ FORBIDDEN_MOUNT_SOURCES: FrozenSet[str] = frozenset(
         "/proc/kcore",
         "/dev/mem",
         "/dev/kmem",
+        "audit_vault",
+        ".audit.jsonl",
     }
 )
 
@@ -161,8 +163,8 @@ class SandboxGuard(SecureComponent):
 
         cmd.extend(["--bind", real_ws, real_ws, "--chdir", real_ws])
 
-        # Protect .git/hooks and .env inside the workspace if they exist by over-mounting read-only
-        for protected_rel in (".git/hooks", ".env"):
+        # Protect .git/hooks, .env, and audit vault artifacts inside the workspace if they exist
+        for protected_rel in (".git/hooks", ".env", "audit_vault", ".audit.jsonl"):
             prot_full = os.path.join(real_ws, protected_rel)
             if os.path.exists(prot_full):
                 cmd.extend(["--ro-bind", prot_full, prot_full])
@@ -198,7 +200,12 @@ class SandboxGuard(SecureComponent):
         ssh_dir = os.path.join(user_home, ".ssh")
 
         for mount_candidate in (real_ws, *[os.path.realpath(m) for m in extra_mounts]):
-            if mount_candidate in FORBIDDEN_MOUNT_SOURCES:
+            if (
+                mount_candidate in FORBIDDEN_MOUNT_SOURCES
+                or os.path.basename(mount_candidate) in ("audit_vault", ".audit.jsonl")
+                or os.path.basename(mount_candidate).endswith(".audit.jsonl")
+                or (os.sep + "audit_vault" + os.sep) in (mount_candidate + os.sep)
+            ):
                 raise SandboxSecurityError(
                     f"Sandbox escape risk: Mounting forbidden host resource '{mount_candidate}' is blocked.",
                     vector_id="E.1",
