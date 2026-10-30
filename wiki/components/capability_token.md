@@ -12,7 +12,7 @@
 | **Title** | Ring-0 Sudo Capability Token & Attenuation Engine |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `A.1`, `A.3`, `F.2`, `F.3` |
-| **Source File** | [`src/activesec/core/capability_token.py`](../../src/activesec/core/capability_token.py) (`sha256:18f19dda4056`) |
+| **Source File** | [`src/activesec/core/capability_token.py`](../../src/activesec/core/capability_token.py) (`sha256:1c68f7c29f49`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_capability_token.py`](../../tests/security/test_sec_capability_token.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
 | **Adversarial Security Verification** | **VERIFIED (PASS)** (5 test vectors) |
