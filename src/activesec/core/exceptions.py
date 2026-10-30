@@ -54,3 +54,8 @@ class CanaryTripwireError(ActiveSecError):
 
 class SocialEngineeringAlertError(ActiveSecError):
     """Raised when a command exhibits obfuscation, Trojan Source Unicode, or high-risk LotL patterns."""
+
+
+class ModelSecurityError(ActiveSecError):
+    """Raised when LLM provider configuration, routing, digest verification, or response validation fails."""
+
