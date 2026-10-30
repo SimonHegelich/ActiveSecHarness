@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "activesec-harness"
+version = "0.1.0"
+description = "Adaptive open-source coding harness with sudo capability chains, deterministic Ring-0 security guards, and self-updating Karpathy security wiki."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Simon Hegelich"}
+]
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --tb=short"
+markers = [
+    "security: Dedicated adversarial security test verifying threat taxonomy vectors",
+]
