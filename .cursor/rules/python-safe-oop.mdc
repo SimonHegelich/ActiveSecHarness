@@ -1,0 +1,26 @@
+---
+description: Core OOP, Pythonic, and Safe-by-Construction coding standards for ActiveSecHarness
+globs: **/*.py
+alwaysApply: true
+---
+
+# Python Security & Engineering Standards
+
+- **Language**: Write 100% of code, docstrings, comments, and exception messages in **English**.
+- **OOP & Component Contract**: All security-relevant classes must inherit from `SecureComponent` (`src/activesec/core/component.py`) and provide a complete `ComponentSecurityAssessment`.
+- **Immutability & Typing**: Use `from __future__ import annotations`, strict type hints, and `@dataclass(frozen=True, slots=True)` for policies, tokens, and events.
+- **Forbidden Unsafe Calls**:
+  - Never use `eval`, `exec`, `pickle`, `os.system`, `subprocess.*(..., shell=True)`, `extractall()`, or `random` for secrets.
+  - Always use `os.path.realpath()` for path validation and `hmac.compare_digest()` for secret/signature comparisons.
+
+```python
+# BAD: Unverified path and mutable config
+class ArchiveExtractor:
+    def unpack(self, zf, dest):
+        zf.extractall(dest)
+
+# GOOD: Immutable policy, SecureComponent contract, streaming & canonical path check
+@dataclass(frozen=True, slots=True)
+class ArchivePolicy:
+    max_total_bytes: int = 500 * 1024 * 1024
+```

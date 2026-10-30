@@ -1,0 +1,12 @@
+---
+description: Mandatory Component Security Testing, Karpathy Wiki Sync, and Atomic English Git Commits
+alwaysApply: true
+---
+
+# Security Testing, Karpathy Wiki & Atomic Git Workflow
+
+1. **Dedicated Security Tests**: Every component in `src/activesec/` requires an adversarial test suite in `tests/security/test_sec_<component>.py` testing real attack vectors (ZipBombs, traversal, token forgery, dictionary attacks, SSRF).
+2. **Karpathy Wiki Auto-Update**: After creating or updating any component or security test, always execute `python3 tools/wiki_sync.py` to run the adversarial test suite and update `wiki/SECURITY_LEDGER.md`, `wiki/components/*.md`, and `wiki/log.md`.
+3. **Atomic English Git Commits**:
+   - Commit each logical unit separately (`docs`, `core`, `guard`, `wiki`).
+   - All commit messages must be in English and include `Why:`, `What:`, and `Security & Verification:` sections.
