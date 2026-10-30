@@ -32,10 +32,14 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 # Import all components so they register with SecureComponent._REGISTRY
+import activesec.core.audit_log  # noqa: E402, F401
 import activesec.core.capability_token  # noqa: E402, F401
 import activesec.guards.archive_guard  # noqa: E402, F401
+import activesec.guards.canary_guard  # noqa: E402, F401
 import activesec.guards.credential_guard  # noqa: E402, F401
+import activesec.guards.malware_guard  # noqa: E402, F401
 import activesec.guards.network_guard  # noqa: E402, F401
+import activesec.guards.sandbox_guard  # noqa: E402, F401
 import activesec.sovereign.deobfuscator  # noqa: E402, F401
 from activesec.core.component import ComponentSecurityAssessment, SecureComponent  # noqa: E402
 
@@ -118,8 +122,7 @@ def run_component_security_tests(test_file: Path) -> Tuple[bool, Tuple[TestCaseI
 
     cases: List[TestCaseInfo] = []
     for func_name, doc in discovered_tests:
-        # Check if any parametrized or direct execution of func_name failed
-        failed = f"::{func_name} FAILED" in stdout or f"::{func_name}[" in stdout and "FAILED" in stdout
+        failed = f"::{func_name} FAILED" in stdout or (f"::{func_name}[" in stdout and "FAILED" in stdout)
         passed = not failed and overall_passed
         cases.append(TestCaseInfo(name=func_name, docstring=doc, passed=passed))
 
