@@ -1,6 +1,6 @@
 # Component Security Assessment: `model_gateway`
 
-> **Auto-Generated & Verified by `tools/wiki_sync.py`** — Do not edit manual status badges directly; update the `ComponentSecurityAssessment` contract in [`src/activesec/harness/model_gateway.py`](../../src/activesec/harness/model_gateway.py) or the security test suite in [`tests/security/test_sec_model_gateway.py`](../../tests/security/test_sec_model_gateway.py).
+> **Auto-Generated & Verified by `WikiManager` (`tools/wiki_sync.py`)** — Do not edit manual status badges directly; update the `ComponentSecurityAssessment` contract in [`src/activesec/harness/model_gateway.py`](../../src/activesec/harness/model_gateway.py) or the security test suite in [`tests/security/test_sec_model_gateway.py`](../../tests/security/test_sec_model_gateway.py).
 
 ---
 

@@ -1,6 +1,6 @@
 # Component Security Assessment: `security_kernel`
 
-> **Auto-Generated & Verified by `tools/wiki_sync.py`** — Do not edit manual status badges directly; update the `ComponentSecurityAssessment` contract in [`src/activesec/core/security_kernel.py`](../../src/activesec/core/security_kernel.py) or the security test suite in [`tests/security/test_sec_security_kernel.py`](../../tests/security/test_sec_security_kernel.py).
+> **Auto-Generated & Verified by `WikiManager` (`tools/wiki_sync.py`)** — Do not edit manual status badges directly; update the `ComponentSecurityAssessment` contract in [`src/activesec/core/security_kernel.py`](../../src/activesec/core/security_kernel.py) or the security test suite in [`tests/security/test_sec_security_kernel.py`](../../tests/security/test_sec_security_kernel.py).
 
 ---
 
@@ -12,7 +12,7 @@
 | **Title** | Ring-0 Security Kernel & Complete Mediation Reference Monitor |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `A.1`, `A.3`, `A.4`, `B.1`, `B.2`, `B.3`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.1`, `F.1`, `F.2`, `F.3` |
-| **Source File** | [`src/activesec/core/security_kernel.py`](../../src/activesec/core/security_kernel.py) (`sha256:ef0d9a19441e`) |
+| **Source File** | [`src/activesec/core/security_kernel.py`](../../src/activesec/core/security_kernel.py) (`sha256:d8fc6a8c2aad`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_security_kernel.py`](../../tests/security/test_sec_security_kernel.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
 | **Adversarial Security Verification** | **VERIFIED (PASS)** (3 test vectors) |

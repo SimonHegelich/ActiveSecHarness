@@ -15,6 +15,7 @@ from activesec.core.audit_log import HashChainedAuditLog
 from activesec.core.capability_token import CapabilityCaveat, CapabilityEngine
 from activesec.core.exceptions import ActiveSecError, CanaryTripwireError
 from activesec.core.security_kernel import SecurityKernel
+from activesec.core.wiki_manager import WikiManager
 from activesec.guards.canary_guard import CanaryGuard
 from activesec.harness.agent_loop import AgentLoop, AgentSession
 from activesec.harness.model_gateway import (
@@ -152,6 +153,14 @@ def run_self_test() -> int:
         # 3. Verify cryptographic audit log chain
         audit_log.verify_chain()
         print(f"[PASS] HashChainedAuditLog verified ({len(audit_log.entries)} tamper-evident entries).")
+
+        # 4. Synchronize runtime security telemetry with the Ring-0 Karpathy WikiManager
+        telemetry = kernel.sync_runtime_wiki(session_label="cli_self_test", execute_pytest=False, quiet=True)
+        print(
+            f"[PASS] Karpathy WikiManager synchronized runtime telemetry "
+            f"(events={telemetry.total_events}, allowed={telemetry.allowed_tool_calls}, "
+            f"canary_alerts={telemetry.canary_alerts}, vectors={list(telemetry.triggered_vectors)})."
+        )
         return 0
 
 
@@ -166,6 +175,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Run a live deterministic end-to-end verification of safe execution and blocked attack vectors.",
     )
     parser.add_argument(
+        "--sync-wiki",
+        action="store_true",
+        help="Run the native Ring-0 WikiManager to audit ASTs, execute security tests, and synchronize wiki/.",
+    )
+    parser.add_argument(
         "--provider",
         choices=("openrouter", "ollama"),
         default="openrouter",
@@ -178,6 +192,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Optional model identifier override (must be allowlisted).",
     )
     args = parser.parse_args(argv)
+
+    if args.sync_wiki:
+        try:
+            manager = WikiManager()
+            ok, _ = manager.sync_all(execute_pytest=True, quiet=False)
+            return 0 if ok else 1
+        except ActiveSecError as exc:
+            print(f"[ERROR] Wiki synchronization failed: {exc}", file=sys.stderr)
+            return 1
 
     if args.self_test:
         try:

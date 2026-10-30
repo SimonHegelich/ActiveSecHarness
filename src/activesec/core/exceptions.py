@@ -59,3 +59,16 @@ class SocialEngineeringAlertError(ActiveSecError):
 class ModelSecurityError(ActiveSecError):
     """Raised when LLM provider configuration, routing, digest verification, or response validation fails."""
 
+
+class WikiSecurityError(ActiveSecError):
+    """Raised when Karpathy Wiki AST verification, source hash integrity, or synchronization fails."""
+
+
+class ToolCertificationError(ActiveSecError):
+    """Raised when a tool or agent lacks a valid Ring-0 certificate or fails handler/schema integrity checks."""
+
+
+class ToxicCombinationError(ActiveSecError):
+    """Raised when an agent attempts to combine mutually exclusive tools violating Separation of Duties (SoD)."""
+
+

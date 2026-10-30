@@ -1,6 +1,6 @@
 # Component Security Assessment: `audit_log`
 
-> **Auto-Generated & Verified by `tools/wiki_sync.py`** — Do not edit manual status badges directly; update the `ComponentSecurityAssessment` contract in [`src/activesec/core/audit_log.py`](../../src/activesec/core/audit_log.py) or the security test suite in [`tests/security/test_sec_audit_log.py`](../../tests/security/test_sec_audit_log.py).
+> **Auto-Generated & Verified by `WikiManager` (`tools/wiki_sync.py`)** — Do not edit manual status badges directly; update the `ComponentSecurityAssessment` contract in [`src/activesec/core/audit_log.py`](../../src/activesec/core/audit_log.py) or the security test suite in [`tests/security/test_sec_audit_log.py`](../../tests/security/test_sec_audit_log.py).
 
 ---
 

@@ -1,6 +1,6 @@
 # Component Security Assessment: `archive_guard`
 
-> **Auto-Generated & Verified by `tools/wiki_sync.py`** — Do not edit manual status badges directly; update the `ComponentSecurityAssessment` contract in [`src/activesec/guards/archive_guard.py`](../../src/activesec/guards/archive_guard.py) or the security test suite in [`tests/security/test_sec_archive_guard.py`](../../tests/security/test_sec_archive_guard.py).
+> **Auto-Generated & Verified by `WikiManager` (`tools/wiki_sync.py`)** — Do not edit manual status badges directly; update the `ComponentSecurityAssessment` contract in [`src/activesec/guards/archive_guard.py`](../../src/activesec/guards/archive_guard.py) or the security test suite in [`tests/security/test_sec_archive_guard.py`](../../tests/security/test_sec_archive_guard.py).
 
 ---
 

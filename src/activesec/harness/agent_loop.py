@@ -23,6 +23,7 @@ from activesec.core.exceptions import (
     CapabilityViolationError,
 )
 from activesec.core.security_kernel import SecurityKernel, ToolExecutionResult
+from activesec.core.wiki_manager import WikiManager
 from activesec.harness.model_gateway import (
     ChatMessage,
     ModelGateway,
@@ -136,12 +137,14 @@ class AgentLoop(SecureComponent):
         role: ModelRole = ModelRole.CODING,
         prefer_provider: str = "openrouter",
         halt_on_security_violation: bool = True,
+        wiki_manager: Optional[WikiManager] = None,
     ) -> None:
         self._kernel = kernel
         self._gateway = gateway
         self._role = role
         self._prefer_provider = prefer_provider
         self._halt_on_security_violation = halt_on_security_violation
+        self._wiki_manager: WikiManager = wiki_manager or kernel.wiki_manager
 
     @classmethod
     def security_assessment(cls) -> ComponentSecurityAssessment:
@@ -243,6 +246,7 @@ class AgentLoop(SecureComponent):
         task_prompt: Optional[str] = None,
         *,
         source_trust: str = "TRUSTED",
+        auto_sync_wiki: bool = False,
     ) -> AgentRunSummary:
         """Run the agent loop until completion, security halt, or max_steps."""
         if task_prompt is not None:
@@ -251,12 +255,21 @@ class AgentLoop(SecureComponent):
         outcomes: List[AgentStepOutcome] = []
         final_answer = ""
 
-        while session.step_count < session.max_steps:
-            outcome = self.step(session)
-            outcomes.append(outcome)
-            if outcome.finished:
-                final_answer = outcome.model_response.content
-                break
+        try:
+            while session.step_count < session.max_steps:
+                outcome = self.step(session)
+                outcomes.append(outcome)
+                if outcome.finished:
+                    final_answer = outcome.model_response.content
+                    break
+        finally:
+            if auto_sync_wiki:
+                self._wiki_manager.sync_all(
+                    execute_pytest=False,
+                    audit_log=self._kernel.audit_log,
+                    session_label=f"agent_loop:{session.agent_id}",
+                    quiet=True,
+                )
 
         return AgentRunSummary(
             agent_id=session.agent_id,

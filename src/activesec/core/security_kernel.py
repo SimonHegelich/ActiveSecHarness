@@ -25,6 +25,7 @@ from activesec.core.exceptions import (
     CanaryTripwireError,
     CapabilityViolationError,
 )
+from activesec.core.wiki_manager import RuntimeTelemetrySnapshot, WikiManager
 from activesec.guards.archive_guard import ArchiveGuard
 from activesec.guards.canary_guard import CanaryGuard
 from activesec.guards.credential_guard import CredentialGuard
@@ -61,6 +62,7 @@ class SecurityKernel(SecureComponent):
         network_guard: Optional[NetworkGuard] = None,
         sandbox_guard: Optional[SandboxGuard] = None,
         deobfuscator: Optional[CommandDeobfuscator] = None,
+        wiki_manager: Optional[WikiManager] = None,
     ) -> None:
         self._workspace_dir: str = os.path.realpath(workspace_dir)
         os.makedirs(self._workspace_dir, mode=0o700, exist_ok=True)
@@ -79,6 +81,7 @@ class SecurityKernel(SecureComponent):
         self._network_guard: NetworkGuard = network_guard or NetworkGuard()
         self._sandbox_guard: SandboxGuard = sandbox_guard or SandboxGuard()
         self._deobfuscator: CommandDeobfuscator = deobfuscator or CommandDeobfuscator()
+        self._wiki_manager: WikiManager = wiki_manager or WikiManager()
 
     @classmethod
     def security_assessment(cls) -> ComponentSecurityAssessment:
@@ -123,6 +126,26 @@ class SecurityKernel(SecureComponent):
     @property
     def canary_guard(self) -> CanaryGuard:
         return self._canary_guard
+
+    @property
+    def wiki_manager(self) -> WikiManager:
+        return self._wiki_manager
+
+    def sync_runtime_wiki(
+        self,
+        *,
+        session_label: str = "kernel_runtime",
+        execute_pytest: bool = False,
+        quiet: bool = True,
+    ) -> RuntimeTelemetrySnapshot:
+        """Synchronize runtime telemetry from the kernel's HashChainedAuditLog into the Karpathy Wiki."""
+        self._wiki_manager.sync_all(
+            execute_pytest=execute_pytest,
+            audit_log=self._audit_log,
+            session_label=session_label,
+            quiet=quiet,
+        )
+        return self._wiki_manager.telemetry_history[-1]
 
     def execute_tool_call(
         self,

@@ -42,8 +42,9 @@ Every component in `ActiveSecHarness` is bound by three automated invariants:
 - **[`wiki/log.md`](log.md)** — Append-only chronological record of automated security runs and wiki updates.
 
 ### Per-Component Security Assessments (`wiki/components/`)
-- **[`wiki/components/audit_log.md`](components/audit_log.md)** — Ring-0 Hash-Chained Append-Only Security Audit Log (`A.3`, `F.3`).
+- **[`wiki/components/audit_log.md`](components/audit_log.md)** — Ring-0 Hash-Chained Append-Only Security Audit Log (`A.3`, `B.4`, `D.2`, `F.3`).
 - **[`wiki/components/capability_token.md`](components/capability_token.md)** — Ring-0 Cryptographic `sudo` Capability Token & Monotonic Attenuation Engine (`A.1`, `A.3`, `F.2`, `F.3`).
+- **[`wiki/components/wiki_manager.md`](components/wiki_manager.md)** — Ring-0 Karpathy Security Wiki Compiler & Runtime Telemetry Synchronizer (`A.1`, `A.3`, `B.4`, `F.3`).
 - **[`wiki/components/archive_guard.md`](components/archive_guard.md)** — Ring-0 Streaming Decompression Bomb & Path-Traversal Guard (`B.1`, `B.2`).
 - **[`wiki/components/canary_guard.md`](components/canary_guard.md)** — Ring-0 Honeypot Canary & Zero-False-Positive Intrusion Tripwire (`F.2`, `C.3`, `D.2`, `A.1`).
 - **[`wiki/components/credential_guard.md`](components/credential_guard.md)** — Ring-0 Entropy, De-Mangling Dictionary Attack Defense & Bidirectional Secret DLP (`D.1`, `D.2`, `D.3`).

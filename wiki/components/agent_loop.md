@@ -1,6 +1,6 @@
 # Component Security Assessment: `agent_loop`
 
-> **Auto-Generated & Verified by `tools/wiki_sync.py`** — Do not edit manual status badges directly; update the `ComponentSecurityAssessment` contract in [`src/activesec/harness/agent_loop.py`](../../src/activesec/harness/agent_loop.py) or the security test suite in [`tests/security/test_sec_agent_loop.py`](../../tests/security/test_sec_agent_loop.py).
+> **Auto-Generated & Verified by `WikiManager` (`tools/wiki_sync.py`)** — Do not edit manual status badges directly; update the `ComponentSecurityAssessment` contract in [`src/activesec/harness/agent_loop.py`](../../src/activesec/harness/agent_loop.py) or the security test suite in [`tests/security/test_sec_agent_loop.py`](../../tests/security/test_sec_agent_loop.py).
 
 ---
 
@@ -12,7 +12,7 @@
 | **Title** | Ring-2 Taint-Tracking Agent Loop & Kernel-Mediated Executor |
 | **Privilege Ring** | **Ring 2** |
 | **Mitigated Threat Vectors** | `A.1`, `E.2`, `F.2`, `F.3` |
-| **Source File** | [`src/activesec/harness/agent_loop.py`](../../src/activesec/harness/agent_loop.py) (`sha256:bddf7ddacd69`) |
+| **Source File** | [`src/activesec/harness/agent_loop.py`](../../src/activesec/harness/agent_loop.py) (`sha256:8d89c3435dee`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_agent_loop.py`](../../tests/security/test_sec_agent_loop.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
 | **Adversarial Security Verification** | **VERIFIED (PASS)** (3 test vectors) |
