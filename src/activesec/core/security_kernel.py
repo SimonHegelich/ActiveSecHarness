@@ -25,6 +25,7 @@ from activesec.core.exceptions import (
     CanaryTripwireError,
     CapabilityViolationError,
 )
+from activesec.core.tool_registry import CertifiedToolRegistry
 from activesec.core.wiki_manager import RuntimeTelemetrySnapshot, WikiManager
 from activesec.guards.archive_guard import ArchiveGuard
 from activesec.guards.canary_guard import CanaryGuard
@@ -63,6 +64,7 @@ class SecurityKernel(SecureComponent):
         sandbox_guard: Optional[SandboxGuard] = None,
         deobfuscator: Optional[CommandDeobfuscator] = None,
         wiki_manager: Optional[WikiManager] = None,
+        tool_registry: Optional[CertifiedToolRegistry] = None,
     ) -> None:
         self._workspace_dir: str = os.path.realpath(workspace_dir)
         os.makedirs(self._workspace_dir, mode=0o700, exist_ok=True)
@@ -82,6 +84,7 @@ class SecurityKernel(SecureComponent):
         self._sandbox_guard: SandboxGuard = sandbox_guard or SandboxGuard()
         self._deobfuscator: CommandDeobfuscator = deobfuscator or CommandDeobfuscator()
         self._wiki_manager: WikiManager = wiki_manager or WikiManager()
+        self._tool_registry: Optional[CertifiedToolRegistry] = tool_registry
 
     @classmethod
     def security_assessment(cls) -> ComponentSecurityAssessment:
@@ -130,6 +133,10 @@ class SecurityKernel(SecureComponent):
     @property
     def wiki_manager(self) -> WikiManager:
         return self._wiki_manager
+
+    @property
+    def tool_registry(self) -> Optional[CertifiedToolRegistry]:
+        return self._tool_registry
 
     def sync_runtime_wiki(
         self,
@@ -232,6 +239,15 @@ class SecurityKernel(SecureComponent):
                 context_tainted=context_tainted,
                 current_time=current_time,
             )
+
+            # 3. Verify Tool Certification, Agent-Tool Qualification & Combinatorial SoD Policy
+            if self._tool_registry is not None:
+                self._tool_registry.enforce_tool_call(
+                    request,
+                    agent_id=agent_id,
+                    session_key=f"{agent_id}:{token.token_id}",
+                    current_time=current_time,
+                )
 
             # 4. Dispatch to deterministic guards based on tool_name
             output, sanitized = self._dispatch_tool(
@@ -396,6 +412,14 @@ class SecurityKernel(SecureComponent):
                 f"Verified HTTPS TLS 1.3 endpoint {endpoint.hostname}:{endpoint.port} (IPs: {', '.join(endpoint.pinned_ips)})",
                 False,
             )
+
+        if self._tool_registry is not None:
+            spec = self._tool_registry._tools.get(request.tool_name)
+            if spec is not None and spec.handler is not None:
+                raw_out = str(spec.handler(request.arguments))
+                self._canary_guard.check_stream_for_canaries(raw_out, active_token_id=token.token_id)
+                redacted = self._credential_guard.redact_secrets(raw_out)
+                return (redacted, redacted != raw_out)
 
         raise CapabilityViolationError(
             f"Unsupported or unknown tool type '{request.tool_name}'.",

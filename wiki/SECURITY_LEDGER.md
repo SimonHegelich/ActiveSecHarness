@@ -19,21 +19,22 @@ This ledger is automatically compiled and verified by `WikiManager` ([`src/activ
 | **[`model_gateway`](components/model_gateway.md)** | Ring 0 | `A.1`, `A.2`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.2`, `F.2` | `CLEAN` | **VERIFIED** (8/8 passed) | `905e358ca1` |
 | **[`network_guard`](components/network_guard.md)** | Ring 0 | `C.1`, `C.2`, `C.3` | `CLEAN` | **VERIFIED** (4/4 passed) | `12291c0db4` |
 | **[`sandbox_guard`](components/sandbox_guard.md)** | Ring 0 | `A.1`, `A.2`, `E.1`, `E.2`, `E.3` | `CLEAN` | **VERIFIED** (3/3 passed) | `dc16771e6e` |
-| **[`security_kernel`](components/security_kernel.md)** | Ring 0 | `A.1`, `A.3`, `A.4`, `B.1`, `B.2`, `B.3`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.1`, `F.1`, `F.2`, `F.3` | `CLEAN` | **VERIFIED** (3/3 passed) | `d8fc6a8c2a` |
+| **[`security_kernel`](components/security_kernel.md)** | Ring 0 | `A.1`, `A.3`, `A.4`, `B.1`, `B.2`, `B.3`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.1`, `F.1`, `F.2`, `F.3` | `CLEAN` | **VERIFIED** (3/3 passed) | `10640f9200` |
+| **[`tool_registry`](components/tool_registry.md)** | Ring 0 | `A.1`, `A.3`, `C.2`, `F.2`, `F.3` | `CLEAN` | **VERIFIED** (5/5 passed) | `4323ee8c75` |
 | **[`wiki_manager`](components/wiki_manager.md)** | Ring 0 | `A.1`, `A.3`, `B.4`, `F.3` | `CLEAN` | **VERIFIED** (3/3 passed) | `6ac1c2e6ec` |
 
 ---
 
 ## Summary Metrics
 
-- **Registered Security Components:** 13
-- **Dedicated Adversarial Test Vectors Executed:** 52
+- **Registered Security Components:** 14
+- **Dedicated Adversarial Test Vectors Executed:** 57
 - **Overall Posture:** ALL COMPONENTS VERIFIED
 
 ---
 
 ## Latest Runtime Security Telemetry (`agent_loop:telemetry-agent`)
 
-- **Audit Chain Verification:** `VERIFIED` (Head SHA-256: `d469631d216326fe`)
+- **Audit Chain Verification:** `VERIFIED` (Head SHA-256: `ce3068f3b49550b1`)
 - **Total Mediated Events:** 1 (Allowed: 1, Blocked: 0, Canary Tripwires: 0)
 - **Triggered Threat Vectors:** `NONE`
