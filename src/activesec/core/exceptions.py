@@ -24,6 +24,10 @@ class CapabilityViolationError(ActiveSecError):
     """Raised when a capability token is invalid, expired, tainted, forged, or violates attenuation."""
 
 
+class AuditIntegrityError(ActiveSecError):
+    """Raised when tampering, deletion, reordering, or signature forgery is detected in the audit log."""
+
+
 class ArchiveSecurityError(ActiveSecError):
     """Raised when an archive triggers decompression bomb, Zip-Slip, or special-file guards."""
 
@@ -34,6 +38,18 @@ class CredentialSecurityError(ActiveSecError):
 
 class NetworkSecurityError(ActiveSecError):
     """Raised when a network request violates TLS 1.3, domain allowlists, or Anti-SSRF IP checks."""
+
+
+class MalwareSecurityError(ActiveSecError):
+    """Raised when a file fails magic-byte spoofing, polyglot, YARA-like pattern, or malware hash checks."""
+
+
+class SandboxSecurityError(ActiveSecError):
+    """Raised when a sandbox configuration, environment, mount, or subprocess execution violates containment."""
+
+
+class CanaryTripwireError(ActiveSecError):
+    """Raised with zero false positives when a honeypot canary token or file is accessed or exfiltrated."""
 
 
 class SocialEngineeringAlertError(ActiveSecError):
