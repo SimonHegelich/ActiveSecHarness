@@ -34,12 +34,15 @@ if str(SRC_DIR) not in sys.path:
 # Import all components so they register with SecureComponent._REGISTRY
 import activesec.core.audit_log  # noqa: E402, F401
 import activesec.core.capability_token  # noqa: E402, F401
+import activesec.core.security_kernel  # noqa: E402, F401
 import activesec.guards.archive_guard  # noqa: E402, F401
 import activesec.guards.canary_guard  # noqa: E402, F401
 import activesec.guards.credential_guard  # noqa: E402, F401
 import activesec.guards.malware_guard  # noqa: E402, F401
 import activesec.guards.network_guard  # noqa: E402, F401
 import activesec.guards.sandbox_guard  # noqa: E402, F401
+import activesec.harness.agent_loop  # noqa: E402, F401
+import activesec.harness.model_gateway  # noqa: E402, F401
 import activesec.sovereign.deobfuscator  # noqa: E402, F401
 from activesec.core.component import ComponentSecurityAssessment, SecureComponent  # noqa: E402
 

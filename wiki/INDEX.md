@@ -50,7 +50,10 @@ Every component in `ActiveSecHarness` is bound by three automated invariants:
 - **[`wiki/components/malware_guard.md`](components/malware_guard.md)** — Ring-0 Malware, Magic-Byte Anti-Spoofing & Polyglot Guard (`B.3`, `B.4`, `F.2`).
 - **[`wiki/components/network_guard.md`](components/network_guard.md)** — Ring-0 TLS 1.3 Enforcer & Socket-Level Anti-SSRF/DNS-Rebinding Validator (`C.1`, `C.2`, `C.3`).
 - **[`wiki/components/sandbox_guard.md`](components/sandbox_guard.md)** — Ring-0 Namespace Sandbox (`bubblewrap`), Clean-Room Environment & Resource Quota Guard (`A.1`, `A.2`, `E.1`, `E.2`, `E.3`).
+- **[`wiki/components/security_kernel.md`](components/security_kernel.md)** — Ring-0 Security Kernel & Complete Mediation Reference Monitor (`A.1`, `A.3`, `A.4`, `B.1`, `B.2`, `B.3`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.1`, `F.1`, `F.2`, `F.3`).
+- **[`wiki/components/model_gateway.md`](components/model_gateway.md)** — Ring-0 Hardened OpenRouter & Local Ollama Model Gateway (`A.1`, `A.2`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.2`, `F.2`).
 - **[`wiki/components/deobfuscator.md`](components/deobfuscator.md)** — Ring-1 Social-Engineering Command De-Obfuscator & Trojan-Source Detector (`B.4`, `F.1`, `A.1`).
+- **[`wiki/components/agent_loop.md`](components/agent_loop.md)** — Ring-2 Taint-Tracking Agent Loop & Kernel-Mediated Executor (`A.1`, `E.2`, `F.2`, `F.3`).
 
 ### Threat Vector Domain Syntheses (`wiki/vectors/`)
 - **[`wiki/vectors/domain_a_lotl.md`](vectors/domain_a_lotl.md)** — Domain A: Living off the Land (LotL) & Harness Self-Tampering
