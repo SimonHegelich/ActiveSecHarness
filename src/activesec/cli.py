@@ -520,6 +520,40 @@ def _extract_written_python_files(summary: AgentRunSummary, workspace_dir: str) 
     return written
 
 
+def _recover_unexecuted_python_write_via_kernel(
+    runtime: ChatRuntime,
+    summary: AgentRunSummary,
+    *,
+    out: TextIO,
+) -> List[str]:
+    """If a small local model emitted a slightly truncated JSON fs:write or fenced Python block without a parsed tool_call, recover and execute it via SecurityKernel."""
+    recovered: List[str] = []
+    for outcome in summary.outcomes:
+        if outcome.tool_result is not None:
+            continue
+        raw_text = (outcome.model_response.content or "").strip()
+        if not raw_text:
+            continue
+
+        tc = ModelGateway._extract_embedded_tool_call(raw_text)
+        if tc is not None and tc.tool_name == "fs:write":
+            tool_res = runtime.kernel.execute_tool_call(
+                tc,
+                token=runtime.token,
+                agent_id=CHAT_AGENT_ID,
+                context_tainted=False if runtime.last_session is None else runtime.last_session.context_tainted,
+            )
+            print(f"[tool:{tool_res.tool_name}] {tool_res.output}", file=out)
+            raw_target = tc.target_path or tc.arguments.get("target_path") or tc.arguments.get("path")
+            if raw_target and str(raw_target).endswith(".py"):
+                real_p = os.path.realpath(
+                    raw_target if os.path.isabs(raw_target) else os.path.join(runtime.workspace_dir, raw_target)
+                )
+                if os.path.isfile(real_p) and real_p not in recovered:
+                    recovered.append(real_p)
+    return recovered
+
+
 def run_chat_task(runtime: ChatRuntime, task: str, *, out: TextIO = sys.stdout) -> None:
     """Execute one user task through AgentLoop and run Dual-Model Security Verification on any written Python files."""
     if runtime.engine.is_revoked(runtime.token.token_id):
@@ -552,6 +586,8 @@ def run_chat_task(runtime: ChatRuntime, task: str, *, out: TextIO = sys.stdout) 
 
         if runtime.reviewer_enabled:
             written_py_files = _extract_written_python_files(summary, runtime.workspace_dir)
+            if not written_py_files:
+                written_py_files = _recover_unexecuted_python_write_via_kernel(runtime, summary, out=out)
             for py_file in written_py_files:
                 loop_res = runtime.dual_reviewer.run_verified_coding_loop(
                     py_file,
@@ -662,6 +698,23 @@ def run_interactive_chat(
                     f"(ast_findings={len(rep.ast_findings)}, probes={len(rep.probe_outcomes)})",
                     file=output_stream,
                 )
+                if not rep.approved_for_execution and runtime.reviewer_enabled:
+                    loop_res = runtime.dual_reviewer.run_verified_coding_loop(
+                        str(py_f),
+                        task_description=f"Verify and repair workspace Python module {py_f.name}",
+                        workspace_dir=runtime.workspace_dir,
+                        coder_provider=runtime.provider,
+                        coder_model=runtime.model,
+                        auto_repair=runtime.auto_repair_enabled,
+                    )
+                    print(DualModelReviewer.format_verdict_for_user(loop_res), file=output_stream)
+                    post_rep = loop_res.final_verdict.deterministic_report
+                    post_state = "APPROVED (SAFE)" if loop_res.approved_for_execution else "BLOCKED (UNSAFE)"
+                    print(
+                        f"[test:{py_f.name}:post-repair] {post_state} via SoD sub-agent {post_rep.sod_sub_agent_id} "
+                        f"(ast_findings={len(post_rep.ast_findings)}, probes={len(post_rep.probe_outcomes)})",
+                        file=output_stream,
+                    )
             continue
         if cmd.kind == "wiki":
             ok = sync_wiki_for_runtime(runtime, quiet=False)

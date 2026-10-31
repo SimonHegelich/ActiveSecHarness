@@ -262,3 +262,95 @@ def test_sec_cli_chat_continues_after_security_block(tmp_path: Path) -> None:
     text = out.getvalue()
     assert "SECURITY_BLOCK" in text
     assert "Recovered and ready." in text
+
+
+@pytest.mark.security
+def test_sec_cli_chat_truncated_ollama_json_and_test_triggers_repair(tmp_path: Path) -> None:
+    """[Vector B.1, B.2 & F.2: Truncated Local JSON Recovery & /test Self-Healing] Reproduces terminal 4: recovers missing-brace fs:write JSON and verifies /test triggers the full repair loop on existing unsafe files."""
+    workspace = tmp_path / "workspace_live"
+    workspace.mkdir()
+    user_wiki_dir = tmp_path / "wiki_user"
+
+    # Pre-existing unsafe file in workspace_live (as in terminal 4)
+    legacy_unsafe = workspace / "safe_extract.py"
+    legacy_unsafe.write_text(
+        "import zipfile\ndef safe_extract(zp, dest):\n    with zipfile.ZipFile(zp, 'r') as zf:\n        zf.extractall(dest)\n",
+        encoding="utf-8",
+    )
+
+    new_target = workspace / "safe_zip_extractor.py"
+    step = {"n": 0}
+
+    def _mock_transport(
+        url: str,
+        body: bytes,
+        headers: Mapping[str, str],
+        tls_context: Optional[ssl.SSLContext],
+        timeout: float,
+        max_response_bytes: int,
+    ) -> bytes:
+        req = json.loads(body.decode("utf-8"))
+        msgs = req.get("messages", [])
+        sys_msg = msgs[0]["content"] if msgs else ""
+
+        if "Independent Security Reviewer" in sys_msg:
+            user_msg = msgs[-1]["content"]
+            if "extractall" in user_msg:
+                verdict = {
+                    "approved": False,
+                    "plain_explanation": "extractall() allows Zip-Slip and ZipBombs.",
+                    "how_to_fix": "Use os.path.realpath() and chunked streaming.",
+                    "recommended_model": "openrouter/qwen/qwen3-coder",
+                }
+            else:
+                verdict = {
+                    "approved": True,
+                    "plain_explanation": "Safe streaming extractor verified.",
+                    "how_to_fix": "None.",
+                    "recommended_model": "",
+                }
+            return json.dumps({"model": "qwen3:4b", "message": {"content": json.dumps(verdict)}}).encode("utf-8")
+
+        if "Secure Code Repair Agent" in sys_msg:
+            tc = {
+                "tool_name": "fs:write",
+                "target_path": str(new_target),
+                "arguments": {"content": HARDENED_EXTRACTOR_CODE},
+            }
+            return json.dumps({"model": "qwen3:4b", "message": {"content": json.dumps(tc)}}).encode("utf-8")
+
+        step["n"] += 1
+        if step["n"] == 1:
+            # Exact bug from terminal 4: missing final '}' at the end of the JSON string
+            truncated_json = (
+                '{"tool_name":"fs:write","target_path":"'
+                + str(new_target)
+                + '","arguments":{"content":"import zipfile\\ndef safe_extract_zip(zp, dest):\\n    with zipfile.ZipFile(zp) as zf:\\n        zf.extractall(dest)\\n"}'
+            )
+            return json.dumps({"model": "qwen3:4b", "message": {"content": truncated_json}}).encode("utf-8")
+
+        return json.dumps({"model": "qwen3:4b", "message": {"content": "Done."}}).encode("utf-8")
+
+    out = StringIO()
+    rc = run_scripted_chat(
+        [
+            "Write a save ZIP extructor that is aware of Zip Slip and Zip Bombs.",
+            "/test",
+            "/learn",
+            "/quit",
+        ],
+        workspace_dir=str(workspace),
+        provider="ollama",
+        model="qwen3:4b",
+        user_wiki_dir=str(user_wiki_dir),
+        transport_func=_mock_transport,
+        api_key=None,
+        output_stream=out,
+    )
+    assert rc == 0
+    text = out.getvalue()
+    assert new_target.is_file()
+    assert "Auto-Repair Loop:" in text
+    assert "[test:safe_extract.py:post-repair] APPROVED (SAFE)" in text
+    assert "Cases Completed: 2" in text or "Cases Completed: 1" in text
+
