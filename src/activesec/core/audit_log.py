@@ -5,9 +5,15 @@ as a hash-chained, HMAC-authenticated ledger entry with:
 1. Two-stage pre-logging sanitization (deterministic salted HMAC secret redaction +
    ANSI escape, control character, and Trojan Source Unicode neutralization).
 2. Split-horizon Tier-1 (public structural header) and Tier-2 (authenticated encrypted
-   forensic payload) architecture using per-entry HKDF-HMAC-SHA256 subkeys and
-   Encrypt-then-MAC stream sealing.
-3. Physical vault persistence enforcing strict 0o600 file permissions, 0o700 parent
+   forensic payload) architecture using standard AEAD (`AES-256-GCM` when `cryptography`
+   is installed, or deterministic `HKDF-HMAC-SHA256` Encrypt-then-MAC stream sealing in
+   zero-dependency stdlib environments).
+3. Explicit key-custody separation: `signing_key` and `encryption_key` reside exclusively
+   in Ring-0 process memory (or an external KMS/HSM sink) and are never written to the
+   workspace filesystem. Local disk vaults provide tamper detection against Ring-2/3
+   workspace agents, while non-repudiation against a compromised host root requires
+   streaming Tier-1/Tier-2 entries to an external append-only remote sink.
+4. Physical vault persistence enforcing strict 0o600 file permissions, 0o700 parent
    directory permissions, atomic rename writes, and symlink rejection.
 """
 
@@ -179,7 +185,13 @@ class HashChainedAuditLog(SecureComponent):
             if redaction_salt is not None
             else hmac.new(self._signing_key, b"activesec.audit.redaction.salt.v1", hashlib.sha256).digest()
         )
+        self._key_custody_mode: str = "external_supplied" if signing_key is not None else "ephemeral_ring0_memory"
         self._entries: List[AuditLogEntry] = []
+
+    @property
+    def key_custody_mode(self) -> str:
+        """Return the active key-custody mode ('external_supplied' or 'ephemeral_ring0_memory')."""
+        return self._key_custody_mode
 
     @classmethod
     def security_assessment(cls) -> ComponentSecurityAssessment:
