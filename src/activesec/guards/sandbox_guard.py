@@ -36,6 +36,23 @@ FORBIDDEN_MOUNT_SOURCES: FrozenSet[str] = frozenset(
     }
 )
 
+DISALLOWED_BINARY_FLAGS: Mapping[str, FrozenSet[str]] = {
+    "find": frozenset({"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprintf"}),
+    "tar": frozenset({"--to-command", "--checkpoint-action", "--use-compress-program", "-I"}),
+    "git": frozenset({"--upload-pack", "--receive-pack", "--exec-path"}),
+    "pytest": frozenset({"-o", "--override-ini"}),
+    "chmod": frozenset({"u+s", "g+s", "+s", "4755", "4777", "6755"}),
+}
+
+DISALLOWED_GIT_CONFIG_KEYS: Tuple[str, ...] = (
+    "core.fsmonitor",
+    "core.sshcommand",
+    "core.pager",
+    "core.editor",
+    "alias.",
+    "protocol.ext.allow",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class SandboxPolicy:
@@ -195,6 +212,34 @@ class SandboxGuard(SecureComponent):
                 component_id="sandbox_guard",
             )
 
+        # Enforce per-binary disallowed GTFOBins / subcommand flags (Vector E.3 / A.1)
+        forbidden_flags = DISALLOWED_BINARY_FLAGS.get(binary_name, frozenset())
+        for idx, arg in enumerate(argv[1:], start=1):
+            arg_clean = arg.strip()
+            for flag in forbidden_flags:
+                if arg_clean == flag or arg_clean.startswith(flag + "="):
+                    raise SandboxSecurityError(
+                        f"Disallowed GTFOBins/escape flag '{arg_clean}' on binary '{binary_name}'.",
+                        vector_id="E.3",
+                        component_id="sandbox_guard",
+                    )
+            if binary_name == "git" and arg_clean == "-c" and idx < len(argv) - 1:
+                cfg_pair = argv[idx + 1].strip().lower()
+                if any(cfg_pair.startswith(k) for k in DISALLOWED_GIT_CONFIG_KEYS):
+                    raise SandboxSecurityError(
+                        f"Disallowed git -c config execution hook '{argv[idx + 1]}'.",
+                        vector_id="E.3",
+                        component_id="sandbox_guard",
+                    )
+            if binary_name == "git" and arg_clean.startswith("-c") and len(arg_clean) > 2:
+                cfg_pair = arg_clean[2:].strip().lower()
+                if any(cfg_pair.startswith(k) for k in DISALLOWED_GIT_CONFIG_KEYS):
+                    raise SandboxSecurityError(
+                        f"Disallowed git -c config execution hook '{arg_clean}'.",
+                        vector_id="E.3",
+                        component_id="sandbox_guard",
+                    )
+
         real_ws = os.path.realpath(workspace_dir)
         user_home = os.path.realpath(os.path.expanduser("~"))
         ssh_dir = os.path.join(user_home, ".ssh")
@@ -259,9 +304,24 @@ class SandboxGuard(SecureComponent):
             )
 
         max_fsize = self._policy.max_file_size_bytes
+        max_mem = self._policy.max_memory_bytes
+        max_nproc = self._policy.max_processes
+        cpu_secs = max(1, int(self._policy.timeout_seconds) + 2)
 
         def _apply_rlimits() -> None:
             resource.setrlimit(resource.RLIMIT_FSIZE, (max_fsize, max_fsize))
+            resource.setrlimit(resource.RLIMIT_CPU, (cpu_secs, cpu_secs))
+            try:
+                resource.setrlimit(resource.RLIMIT_AS, (max_mem, max_mem))
+            except (ValueError, OSError):
+                pass
+            try:
+                # Only lower RLIMIT_NPROC if current soft limit is higher and max_nproc > 512
+                # (since RLIMIT_NPROC is per-UID on Linux and a very low value can block fork if user has many desktop processes)
+                if max_nproc >= 512:
+                    resource.setrlimit(resource.RLIMIT_NPROC, (max_nproc, max_nproc))
+            except (ValueError, OSError):
+                pass
 
         try:
             proc = subprocess.run(

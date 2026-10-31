@@ -12,7 +12,7 @@ import ssl
 import pytest
 
 from activesec.core.exceptions import NetworkSecurityError
-from activesec.guards.network_guard import NetworkGuard
+from activesec.guards.network_guard import NetworkGuard, PinnedHTTPSConnection
 
 
 @pytest.mark.security
@@ -77,3 +77,37 @@ def test_sec_hardened_tls_context_enforces_tls13() -> None:
     assert ctx.minimum_version == ssl.TLSVersion.TLSv1_3
     assert ctx.verify_mode == ssl.CERT_REQUIRED
     assert ctx.check_hostname is True
+
+
+@pytest.mark.security
+def test_sec_socket_level_ip_pinning_defeats_post_check_dns_rebinding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """[Vector C.3: DNS Rebinding TOCTOU Defense] PinnedHTTPSConnection dials the pre-validated IP while preserving TLS SNI hostname."""
+    guard = NetworkGuard(dns_resolver=lambda host, port: ["93.184.216.34"])
+    conn = guard.build_pinned_https_connection("https://api.example.com:8443/v1")
+    assert isinstance(conn, PinnedHTTPSConnection)
+    assert conn.pinned_ip == "93.184.216.34"
+    assert conn.host == "api.example.com"
+    assert conn.port == 8443
+
+    dialed_targets: list[tuple[str, int]] = []
+    sni_hosts: list[str] = []
+
+    class DummyRawSocket:
+        pass
+
+    def fake_create_connection(address: tuple[str, int], timeout: object = None, source_address: object = None) -> DummyRawSocket:
+        dialed_targets.append(address)
+        return DummyRawSocket()
+
+    def fake_wrap_socket(sock: object, server_hostname: str | None = None) -> str:
+        sni_hosts.append(server_hostname or "")
+        return "wrapped_tls13_socket"
+
+    monkeypatch.setattr("socket.create_connection", fake_create_connection)
+    monkeypatch.setattr(conn._context, "wrap_socket", fake_wrap_socket)
+
+    conn.connect()
+    # Even if DNS were rebound after validate_url_target, connect() dials the pinned IP 93.184.216.34 directly
+    assert dialed_targets == [("93.184.216.34", 8443)]
+    assert sni_hosts == ["api.example.com"]
+

@@ -95,7 +95,8 @@ class PasswordPolicy:
     """Immutable password strength and dictionary-defense policy."""
 
     min_length: int = 14
-    min_shannon_bits: float = 52.0
+    min_shannon_bits: float = 56.0
+    min_bits_per_char: float = 4.0
     min_character_classes: int = 3
     min_stem_length_for_dict_match: int = 4
 
@@ -150,18 +151,24 @@ class CredentialGuard(SecureComponent):
         )
 
     @staticmethod
-    def calculate_shannon_entropy_bits(value: str) -> float:
-        """Compute total Shannon entropy in bits for a string."""
+    def calculate_shannon_bits_per_char(value: str) -> float:
+        """Compute Shannon entropy in bits per character for a string."""
         if not value:
             return 0.0
         length = len(value)
         frequencies: dict[str, int] = {}
         for char in value:
             frequencies[char] = frequencies.get(char, 0) + 1
-        entropy_per_char = -sum(
+        return -sum(
             (count / length) * math.log2(count / length) for count in frequencies.values()
         )
-        return entropy_per_char * length
+
+    @classmethod
+    def calculate_shannon_entropy_bits(cls, value: str) -> float:
+        """Compute total Shannon entropy in bits for a string."""
+        if not value:
+            return 0.0
+        return cls.calculate_shannon_bits_per_char(value) * len(value)
 
     @classmethod
     def demangle_candidates(cls, candidate: str) -> set[str]:
@@ -250,7 +257,15 @@ class CredentialGuard(SecureComponent):
                         component_id="credential_guard",
                     )
 
-        entropy_bits = self.calculate_shannon_entropy_bits(password)
+        bits_per_char = self.calculate_shannon_bits_per_char(password)
+        if bits_per_char < self._policy.min_bits_per_char:
+            raise CredentialSecurityError(
+                f"Password Shannon entropy per character ({bits_per_char:.2f} bits/char) is below minimum threshold ({self._policy.min_bits_per_char:.1f} bits/char).",
+                vector_id="D.1",
+                component_id="credential_guard",
+            )
+
+        entropy_bits = bits_per_char * len(password)
         if entropy_bits < self._policy.min_shannon_bits:
             raise CredentialSecurityError(
                 f"Password Shannon entropy ({entropy_bits:.1f} bits) is below minimum threshold ({self._policy.min_shannon_bits} bits).",
@@ -258,8 +273,8 @@ class CredentialGuard(SecureComponent):
                 component_id="credential_guard",
             )
 
-    @staticmethod
-    def generate_strong_secret(length: int = 32) -> str:
+    @classmethod
+    def generate_strong_secret(cls, length: int = 32) -> str:
         """Generate a cryptographically strong secret using OS CSPRNG (never LLM text)."""
         if length < 20:
             raise CredentialSecurityError(
@@ -275,6 +290,7 @@ class CredentialGuard(SecureComponent):
                 and any(c.isupper() for c in candidate)
                 and any(c.isdigit() for c in candidate)
                 and any(c in "!@#%^&*-_=+" for c in candidate)
+                and cls.calculate_shannon_bits_per_char(candidate) >= 4.0
             ):
                 return candidate
 

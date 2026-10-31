@@ -7,12 +7,13 @@ Pentest CapabilityToken.
 
 from __future__ import annotations
 
+import http.client
 import ipaddress
 import socket
 import ssl
 import urllib.parse
 from dataclasses import dataclass
-from typing import Callable, FrozenSet, List, Tuple
+from typing import Callable, FrozenSet, List, Optional, Tuple
 
 from activesec.core.component import ComponentSecurityAssessment, SecureComponent
 from activesec.core.exceptions import NetworkSecurityError
@@ -29,6 +30,61 @@ class ValidatedEndpoint:
     hostname: str
     port: int
     pinned_ips: Tuple[str, ...]
+
+    @property
+    def primary_pinned_ip(self) -> str:
+        """Return the primary pre-verified IP address for socket-level connection pinning."""
+        if not self.pinned_ips:
+            raise NetworkSecurityError(
+                f"ValidatedEndpoint for '{self.hostname}' contains no pinned IPs.",
+                vector_id="C.2",
+                component_id="network_guard",
+            )
+        return self.pinned_ips[0]
+
+
+class PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Socket-level IP-pinned HTTPS connection defeating DNS rebinding TOCTOU.
+
+    Connects the raw TCP socket directly to ``pinned_ip`` (never re-resolving ``host`` via OS DNS),
+    while wrapping the TLS 1.3 handshake with ``server_hostname=host`` for strict SNI & X.509
+    certificate hostname verification.
+    """
+
+    def __init__(
+        self,
+        endpoint: ValidatedEndpoint,
+        *,
+        timeout: float = 10.0,
+        ssl_context: Optional[ssl.SSLContext] = None,
+    ) -> None:
+        ctx = ssl_context or NetworkGuard.create_hardened_tls_context()
+        super().__init__(
+            host=endpoint.hostname,
+            port=endpoint.port,
+            timeout=timeout,
+            context=ctx,
+        )
+        self._pinned_endpoint: ValidatedEndpoint = endpoint
+
+    @property
+    def pinned_ip(self) -> str:
+        return self._pinned_endpoint.primary_pinned_ip
+
+    def connect(self) -> None:
+        """Dial the pre-verified ``pinned_ip`` directly and perform TLS 1.3 SNI handshake for ``self.host``."""
+        raw_sock = socket.create_connection(
+            (self.pinned_ip, self.port),
+            self.timeout,
+            self.source_address,
+        )
+        if self._tunnel_host:
+            self.sock = raw_sock
+            self._tunnel()
+        self.sock = self._context.wrap_socket(
+            raw_sock,
+            server_hostname=self.host,
+        )
 
 
 class NetworkGuard(SecureComponent):
@@ -101,7 +157,12 @@ class NetworkGuard(SecureComponent):
         ctx.options |= ssl.OP_NO_COMPRESSION
         return ctx
 
-    def validate_url_target(self, url: str) -> ValidatedEndpoint:
+    def validate_url_target(
+        self,
+        url: str,
+        *,
+        extra_allowed_cidrs: FrozenSet[str] = frozenset(),
+    ) -> ValidatedEndpoint:
         """Validate a URL against scheme, domain allowlist, and socket-level Anti-SSRF IP checks."""
         parsed = urllib.parse.urlsplit(url)
         scheme = parsed.scheme.lower()
@@ -144,8 +205,11 @@ class NetworkGuard(SecureComponent):
                 component_id="network_guard",
             )
 
+        extra_nets = tuple(
+            ipaddress.ip_network(cidr, strict=False) for cidr in extra_allowed_cidrs
+        )
         for ip_str in resolved_ips:
-            self._validate_ip_address(ip_str, hostname=hostname)
+            self._validate_ip_address(ip_str, hostname=hostname, extra_nets=extra_nets)
 
         return ValidatedEndpoint(
             scheme=scheme,
@@ -154,7 +218,24 @@ class NetworkGuard(SecureComponent):
             pinned_ips=tuple(resolved_ips),
         )
 
-    def _validate_ip_address(self, ip_str: str, *, hostname: str) -> None:
+    def build_pinned_https_connection(
+        self,
+        url: str,
+        *,
+        timeout: float = 10.0,
+        extra_allowed_cidrs: FrozenSet[str] = frozenset(),
+    ) -> PinnedHTTPSConnection:
+        """Validate ``url`` once and return a socket-level IP-pinned ``PinnedHTTPSConnection``."""
+        endpoint = self.validate_url_target(url, extra_allowed_cidrs=extra_allowed_cidrs)
+        return PinnedHTTPSConnection(endpoint, timeout=timeout)
+
+    def _validate_ip_address(
+        self,
+        ip_str: str,
+        *,
+        hostname: str,
+        extra_nets: Tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (),
+    ) -> None:
         try:
             ip_obj = ipaddress.ip_address(ip_str)
         except ValueError as exc:
@@ -169,7 +250,7 @@ class NetworkGuard(SecureComponent):
             ip_obj = ip_obj.ipv4_mapped
 
         # Check if explicitly covered by an isolated Pentest Lab scope
-        if any(ip_obj in net for net in self._allowed_private_networks):
+        if any(ip_obj in net for net in (*self._allowed_private_networks, *extra_nets)):
             return
 
         if (

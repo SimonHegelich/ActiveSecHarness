@@ -77,3 +77,33 @@ def test_sec_unauthorized_lotl_binary_and_timeout_enforced(tmp_path: os.PathLike
     with pytest.raises(SandboxSecurityError) as exc_info2:
         guard.run_sandboxed(["python3", "-c", "while True: pass"], workspace_dir=str(tmp_path))
     assert exc_info2.value.vector_id == "E.2"
+
+
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "disallowed_argv",
+    [
+        ["find", ".", "-name", "*.py", "-exec", "sh", "-c", "id", ";"],
+        ["find", ".", "-execdir", "/bin/sh", ";"],
+        ["tar", "-cf", "out.tar", ".", "--checkpoint-action=exec=sh"],
+        ["tar", "-xf", "in.tar", "--to-command=sh"],
+        ["git", "-c", "core.fsmonitor=evil.sh", "status"],
+        ["git", "-c", "core.sshCommand=evil.sh", "fetch"],
+        ["pytest", "-o", "console_output_style=classic"],
+        ["chmod", "u+s", "backdoor"],
+    ],
+)
+def test_sec_gtfobins_disallowed_binary_flags_blocked(
+    tmp_path: os.PathLike[str],
+    disallowed_argv: list[str],
+) -> None:
+    """[Vector E.3: Disallowed Binary Flags] Blocks GTFOBins flag escapes on allowlisted binaries."""
+    guard = SandboxGuard(
+        SandboxPolicy(
+            allowed_binaries=frozenset({"find", "tar", "git", "pytest", "chmod", "python3"})
+        )
+    )
+    with pytest.raises(SandboxSecurityError) as exc_info:
+        guard.run_sandboxed(disallowed_argv, workspace_dir=str(tmp_path))
+    assert exc_info.value.vector_id == "E.3"
+
