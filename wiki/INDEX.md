@@ -55,6 +55,9 @@ Every component in `ActiveSecHarness` is bound by three automated invariants:
 - **[`wiki/components/security_kernel.md`](components/security_kernel.md)** — Ring-0 Security Kernel & Complete Mediation Reference Monitor (`A.1`, `A.3`, `A.4`, `B.1`, `B.2`, `B.3`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.1`, `F.1`, `F.2`, `F.3`).
 - **[`wiki/components/model_gateway.md`](components/model_gateway.md)** — Ring-0 Hardened OpenRouter & Local Ollama Model Gateway (`A.1`, `A.2`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.2`, `F.2`).
 - **[`wiki/components/deobfuscator.md`](components/deobfuscator.md)** — Ring-1 Social-Engineering Command De-Obfuscator & Trojan-Source Detector (`B.4`, `F.1`, `A.1`).
+- **[`wiki/components/user_wiki_manager.md`](components/user_wiki_manager.md)** — Ring-1 Didactic User Security Academy Wiki Manager (`wiki_user/`) (`F.1`, `D.2`, `B.4`, `A.3`).
+- **[`wiki/components/code_verifier.md`](components/code_verifier.md)** — Ring-0 Deterministic Application Code Verifier & SoD Sandbox Test Runner (`A.1`, `B.1`, `B.2`, `B.4`, `D.1`, `D.3`, `E.1`, `F.3`).
+- **[`wiki/components/dual_model_reviewer.md`](components/dual_model_reviewer.md)** — Ring-2 Dual-Model Security Reviewer & Self-Healing Repair Orchestrator (`A.1`, `B.1`, `B.2`, `D.1`, `F.1`, `F.3`).
 - **[`wiki/components/agent_loop.md`](components/agent_loop.md)** — Ring-2 Taint-Tracking Agent Loop & Kernel-Mediated Executor (`A.1`, `E.2`, `F.2`, `F.3`).
 
 ### Threat Vector Domain Syntheses (`wiki/vectors/`)

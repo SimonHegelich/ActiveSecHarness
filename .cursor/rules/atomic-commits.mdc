@@ -1,0 +1,14 @@
+---
+description: Atomic git commits for ActiveSecHarness (one logical change per commit)
+alwaysApply: true
+---
+
+# Atomic commits (ActiveSecHarness)
+
+When committing in this repository (`/home/simon/Cursor/ActiveSecHarness`):
+
+- Use **atomic commits**: one logical change per commit.
+- Split unrelated changes (e.g. docs vs core vs guard vs wiki vs tests) into separate commits.
+- Do not bundle independent features, refactors, or docs updates into a single commit.
+
+This requirement applies only to ActiveSecHarness. Other co-evolving repos (e.g. papermachineclip / LotLImmune) do not require atomic commits.
