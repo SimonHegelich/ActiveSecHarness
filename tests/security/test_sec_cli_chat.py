@@ -19,15 +19,20 @@ from activesec.cli import (
     select_coding_model,
 )
 from activesec.core.exceptions import ModelSecurityError
+from tests.security.test_sec_dual_model_reviewer import HARDENED_EXTRACTOR_CODE
 
 
 @pytest.mark.security
 def test_sec_cli_chat_parser_commands() -> None:
-    """[Vector E.2: CLI Control Surface] REPL parser recognizes slash commands and tasks."""
+    """[Vector E.2: CLI Control Surface] REPL parser recognizes slash commands (/status, /models, /test, /learn, /wiki, /quit) and tasks."""
     assert parse_repl_line("").kind == "empty"
     assert parse_repl_line("  /quit ").kind == "quit"
     assert parse_repl_line("/status").kind == "status"
     assert parse_repl_line("/wiki").kind == "wiki"
+    assert parse_repl_line("/learn").kind == "learn"
+    assert parse_repl_line("/test").kind == "test"
+    assert parse_repl_line("/models").kind == "models"
+    assert parse_repl_line("/model reviewer openrouter/qwen/qwen3-coder").kind == "models"
     assert parse_repl_line("/nope").kind == "unknown"
     task = parse_repl_line("Create hello.txt with text ActiveSecHarness")
     assert task.kind == "task"
@@ -100,6 +105,7 @@ def test_sec_cli_chat_scripted_repl_step_offline(tmp_path: Path) -> None:
         workspace_dir=str(workspace),
         provider="openrouter",
         model="qwen/qwen3-coder",
+        user_wiki_dir=str(tmp_path / "wiki_user"),
         transport_func=_mock_transport,
         api_key="offline-test-key",
         output_stream=out,
@@ -115,12 +121,96 @@ def test_sec_cli_chat_scripted_repl_step_offline(tmp_path: Path) -> None:
 
 
 @pytest.mark.security
+def test_sec_cli_chat_dual_reviewer_and_learn_test_commands(tmp_path: Path) -> None:
+    """[Vector B.1, B.2 & F.1: End-to-End Chat Review, Repair & User Academy Wiki] Verifies /models, automatic dual-model repair of unsafe extractall(), /test, and /learn."""
+    workspace = tmp_path / "workspace_live"
+    workspace.mkdir()
+    user_wiki_dir = tmp_path / "wiki_user"
+    py_target = workspace / "safe_extract.py"
+    step = {"n": 0}
+
+    def _mock_transport(
+        url: str,
+        body: bytes,
+        headers: Mapping[str, str],
+        tls_context: Optional[ssl.SSLContext],
+        timeout: float,
+        max_response_bytes: int,
+    ) -> bytes:
+        req = json.loads(body.decode("utf-8"))
+        msgs = req.get("messages", [])
+        sys_msg = msgs[0]["content"] if msgs else ""
+
+        if "Independent Security Reviewer" in sys_msg:
+            user_msg = msgs[-1]["content"]
+            if "extractall" in user_msg:
+                verdict = {
+                    "approved": False,
+                    "plain_explanation": "extractall() allows Zip-Slip and ZipBombs.",
+                    "how_to_fix": "Use os.path.realpath() and chunked streaming.",
+                    "recommended_model": "openrouter/qwen/qwen3-coder",
+                }
+            else:
+                verdict = {
+                    "approved": True,
+                    "plain_explanation": "Safe streaming extractor verified.",
+                    "how_to_fix": "None.",
+                    "recommended_model": "",
+                }
+            return json.dumps({"model": "qwen/qwen3-coder", "choices": [{"message": {"content": json.dumps(verdict)}}]}).encode("utf-8")
+
+        if "Secure Code Repair Agent" in sys_msg:
+            tc = {
+                "tool_name": "fs:write",
+                "target_path": str(py_target),
+                "arguments": {"content": HARDENED_EXTRACTOR_CODE},
+            }
+            return json.dumps({"model": "qwen/qwen3-coder", "choices": [{"message": {"content": "Fixed.", "tool_call": tc}}]}).encode("utf-8")
+
+        step["n"] += 1
+        if step["n"] == 1:
+            tc = {
+                "tool_name": "fs:write",
+                "target_path": str(py_target),
+                "arguments": {
+                    "content": "import zipfile\ndef unpack(z, d):\n    with zipfile.ZipFile(z) as zf:\n        zf.extractall(d)\n"
+                },
+            }
+            return json.dumps({"model": "qwen3:4b", "choices": [{"message": {"content": json.dumps(tc)}}]}).encode("utf-8")
+
+        return json.dumps({"model": "qwen3:4b", "choices": [{"message": {"content": "Wrote safe_extract.py."}}]}).encode("utf-8")
+
+    out = StringIO()
+    rc = run_scripted_chat(
+        [
+            "/models",
+            "Write safe_extract.py to unpack ZIP files.",
+            "/test",
+            "/learn",
+            "/quit",
+        ],
+        workspace_dir=str(workspace),
+        provider="openrouter",
+        model="qwen/qwen3-coder",
+        user_wiki_dir=str(user_wiki_dir),
+        transport_func=_mock_transport,
+        api_key="offline-test-key",
+        output_stream=out,
+    )
+    assert rc == 0
+    text = out.getvalue()
+    assert "EXECUTION BLOCKED BY SECURITY GATE" in text
+    assert "Auto-Repair Loop: Ran 1 repair iteration(s)" in text
+    assert "[test:safe_extract.py] APPROVED (SAFE)" in text
+    assert "User Security Academy Wiki (`wiki_user/`)" in text
+
+
+@pytest.mark.security
 def test_sec_cli_chat_continues_after_security_block(tmp_path: Path) -> None:
     """[Vector F.2: Canary Continuity] REPL catches canary blocks, refreshes token, and continues."""
     workspace = tmp_path / "ws"
     workspace.mkdir()
     honey = workspace / ".aws_prod_credentials.canary"
-    # Canaries are deployed by build_chat_runtime; we target the default honeyfile name after deploy.
     call_counter = {"n": 0}
 
     def _mock_transport(
@@ -132,9 +222,7 @@ def test_sec_cli_chat_continues_after_security_block(tmp_path: Path) -> None:
         max_response_bytes: int,
     ) -> bytes:
         call_counter["n"] += 1
-        # First task: attempt canary read. Second task: benign finish.
         if call_counter["n"] == 1:
-            # Discover honeyfile path from deployed canaries by scanning workspace.
             honey_paths = list(workspace.glob("*.canary"))
             target = str(honey_paths[0]) if honey_paths else str(honey)
             payload = {
@@ -165,6 +253,7 @@ def test_sec_cli_chat_continues_after_security_block(tmp_path: Path) -> None:
         workspace_dir=str(workspace),
         provider="openrouter",
         model="qwen/qwen3-coder",
+        user_wiki_dir=str(tmp_path / "wiki_user"),
         transport_func=_mock_transport,
         api_key="offline-test-key",
         output_stream=out,

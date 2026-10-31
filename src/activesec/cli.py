@@ -20,9 +20,12 @@ from activesec.core.capability_token import CapabilityCaveat, CapabilityEngine, 
 from activesec.core.exceptions import ActiveSecError, CanaryTripwireError, ModelSecurityError
 from activesec.core.security_kernel import SecurityKernel
 from activesec.core.tool_registry import CertifiedToolRegistry
+from activesec.core.user_wiki_manager import UserWikiManager
 from activesec.core.wiki_manager import WikiManager
 from activesec.guards.canary_guard import CanaryGuard
+from activesec.guards.code_verifier import CodeVerifier
 from activesec.harness.agent_loop import AgentLoop, AgentRunSummary, AgentSession
+from activesec.harness.dual_model_reviewer import DualModelReviewer
 from activesec.harness.model_gateway import (
     ModelGateway,
     ModelGatewayPolicy,
@@ -56,7 +59,7 @@ CHAT_SYSTEM_PROMPT = (
 class ReplCommand:
     """Parsed interactive REPL command."""
 
-    kind: str  # task | quit | status | wiki | empty
+    kind: str  # task | quit | status | wiki | learn | test | models | empty | unknown
     payload: str = ""
 
 
@@ -76,6 +79,11 @@ class ChatRuntime:
     gateway: ModelGateway
     loop: AgentLoop
     token: CapabilityToken
+    code_verifier: CodeVerifier
+    user_wiki_manager: UserWikiManager
+    dual_reviewer: DualModelReviewer
+    reviewer_enabled: bool = True
+    auto_repair_enabled: bool = True
     last_session: Optional[AgentSession] = None
     tasks_completed: int = 0
     openrouter_key_present: bool = False
@@ -191,6 +199,13 @@ def parse_repl_line(line: str) -> ReplCommand:
         return ReplCommand(kind="status")
     if lower in {"/wiki", ":wiki"}:
         return ReplCommand(kind="wiki")
+    if lower in {"/learn", "/user-wiki", ":learn"}:
+        return ReplCommand(kind="learn")
+    if lower == "/test" or lower.startswith("/test "):
+        return ReplCommand(kind="test", payload=text[len("/test") :].strip())
+    if lower in {"/models", "/model"} or lower.startswith("/models ") or lower.startswith("/model "):
+        parts = text.split(maxsplit=1)
+        return ReplCommand(kind="models", payload=parts[1].strip() if len(parts) > 1 else "")
     if text.startswith("/"):
         return ReplCommand(kind="unknown", payload=text)
     return ReplCommand(kind="task", payload=text)
@@ -226,13 +241,18 @@ def build_chat_runtime(
     provider: str,
     model: Optional[str],
     max_steps: int,
+    reviewer_provider: str = "openrouter",
+    reviewer_model: Optional[str] = None,
+    reviewer_enabled: bool = True,
+    auto_repair_enabled: bool = True,
+    user_wiki_dir: Optional[str] = None,
     transport_func=None,
     api_key: Optional[str] = None,
     openrouter_config: Optional[OpenRouterConfig] = None,
     ollama_config: Optional[OllamaLocalConfig] = None,
     skip_provider_probe: bool = False,
 ) -> ChatRuntime:
-    """Construct a least-privilege chat runtime with certified fs tools only."""
+    """Construct a least-privilege chat runtime with certified fs tools and DualModelReviewer."""
     real_workspace = os.path.realpath(workspace_dir)
     os.makedirs(real_workspace, mode=0o700, exist_ok=True)
 
@@ -289,6 +309,19 @@ def build_chat_runtime(
             component_id="cli",
         )
 
+    effective_rev_model = reviewer_model or (
+        or_cfg.default_model if reviewer_provider == "openrouter" else (selected_model or ol_cfg.coding_model)
+    )
+    if reviewer_provider == "openrouter" and effective_rev_model not in or_cfg.allowed_models:
+        or_cfg = OpenRouterConfig(
+            endpoint_url=or_cfg.endpoint_url,
+            default_model=or_cfg.default_model,
+            allowed_models=frozenset(set(or_cfg.allowed_models) | {effective_rev_model}),
+            timeout_seconds=or_cfg.timeout_seconds,
+            temperature=or_cfg.temperature,
+            max_tokens=or_cfg.max_tokens,
+        )
+
     engine = CapabilityEngine()
     audit_log = HashChainedAuditLog()
     canary_guard = CanaryGuard(on_tripwire=engine.revoke_token)
@@ -322,6 +355,28 @@ def build_chat_runtime(
         api_key=api_key if api_key is not None else None,
     )
 
+    code_verifier = CodeVerifier(
+        capability_engine=engine,
+        tool_registry=tool_registry,
+    )
+    repo_root = kernel.wiki_manager.repo_root
+    if user_wiki_dir is not None:
+        real_user_wiki = Path(os.path.realpath(user_wiki_dir))
+        effective_root = repo_root if str(real_user_wiki).startswith(str(repo_root) + os.sep) else real_user_wiki.parent
+        user_wiki_manager = UserWikiManager(repo_root=effective_root, user_wiki_dir=real_user_wiki)
+    else:
+        user_wiki_manager = UserWikiManager(repo_root=repo_root)
+
+    dual_reviewer = DualModelReviewer(
+        gateway=gateway,
+        code_verifier=code_verifier,
+        user_wiki_manager=user_wiki_manager,
+        reviewer_provider=reviewer_provider,
+        reviewer_model=effective_rev_model,
+        fallback_local_reviewer_model=selected_model or ol_cfg.coding_model,
+        openrouter_key_available=(key_present or bool(api_key)),
+    )
+
     token = _issue_chat_token(engine, real_workspace)
     loop = AgentLoop(
         kernel=kernel,
@@ -345,6 +400,11 @@ def build_chat_runtime(
         gateway=gateway,
         loop=loop,
         token=token,
+        code_verifier=code_verifier,
+        user_wiki_manager=user_wiki_manager,
+        dual_reviewer=dual_reviewer,
+        reviewer_enabled=reviewer_enabled,
+        auto_repair_enabled=auto_repair_enabled,
         openrouter_key_present=key_present or bool(api_key),
         ollama_models=tuple(discovered),
         digest_pinning_enabled=digest_pinning,
@@ -366,6 +426,11 @@ def status_lines(runtime: ChatRuntime) -> List[str]:
     lines = [
         f"provider={runtime.provider}",
         f"model={runtime.model}",
+        f"reviewer_provider={runtime.dual_reviewer.reviewer_provider}",
+        f"reviewer_model={runtime.dual_reviewer.reviewer_model}",
+        f"reviewer_enabled={runtime.reviewer_enabled}",
+        f"auto_repair_enabled={runtime.auto_repair_enabled}",
+        f"user_academy_level={runtime.user_wiki_manager.current_mastery_level}",
         f"workspace={runtime.workspace_dir}",
         f"context_tainted={taint}",
         f"token_id={runtime.token.token_id[:12]}…",
@@ -379,6 +444,45 @@ def status_lines(runtime: ChatRuntime) -> List[str]:
         f"digest_pinning_enabled={runtime.digest_pinning_enabled}",
     ]
     return lines
+
+
+def handle_models_command(runtime: ChatRuntime, payload: str, *, out: TextIO) -> None:
+    """Display or switch active coder/reviewer models (`/models`, `/model coder ...`, `/model reviewer ...`)."""
+    if not payload:
+        print(
+            f"[models] coder={runtime.provider}/{runtime.model} | "
+            f"reviewer={runtime.dual_reviewer.reviewer_provider}/{runtime.dual_reviewer.reviewer_model} "
+            f"(openrouter_key_present={runtime.openrouter_key_present})",
+            file=out,
+        )
+        print(
+            "[models] Usage: `/model coder <provider>/<model>` or `/model reviewer <provider>/<model>`",
+            file=out,
+        )
+        return
+
+    parts = payload.split()
+    if len(parts) != 2 or parts[0] not in ("coder", "reviewer") or "/" not in parts[1]:
+        print(
+            "[error] Invalid syntax. Use `/model coder <provider>/<model>` or `/model reviewer <provider>/<model>`.",
+            file=out,
+        )
+        return
+
+    role_target, spec = parts[0], parts[1]
+    prov, mod = spec.split("/", 1)
+    if prov not in ("openrouter", "ollama") or not mod:
+        print("[error] Provider must be 'openrouter' or 'ollama'.", file=out)
+        return
+
+    if role_target == "coder":
+        runtime.provider = prov
+        runtime.model = mod
+        runtime.loop._prefer_provider = prov
+        print(f"[models] Updated coder model to {prov}/{mod}", file=out)
+    else:
+        runtime.dual_reviewer.configure_reviewer(provider=prov, model=mod)
+        print(f"[models] Updated reviewer model to {prov}/{mod}", file=out)
 
 
 def print_agent_summary(summary: AgentRunSummary, *, out: TextIO) -> None:
@@ -400,8 +504,24 @@ def print_agent_summary(summary: AgentRunSummary, *, out: TextIO) -> None:
         print(f"[final] {summary.final_answer}", file=out)
 
 
+def _extract_written_python_files(summary: AgentRunSummary, workspace_dir: str) -> List[str]:
+    """Return unique canonical paths of `.py` files written during `summary`."""
+    written: List[str] = []
+    for outcome in summary.outcomes:
+        req = outcome.model_response.tool_call
+        if outcome.tool_result is not None and req is not None and req.tool_name == "fs:write":
+            raw_target = req.target_path or req.arguments.get("target_path") or req.arguments.get("path")
+            if raw_target and str(raw_target).endswith(".py"):
+                real_p = os.path.realpath(
+                    raw_target if os.path.isabs(raw_target) else os.path.join(workspace_dir, raw_target)
+                )
+                if os.path.isfile(real_p) and real_p not in written:
+                    written.append(real_p)
+    return written
+
+
 def run_chat_task(runtime: ChatRuntime, task: str, *, out: TextIO = sys.stdout) -> None:
-    """Execute one user task through AgentLoop with Ring-3 least privilege."""
+    """Execute one user task through AgentLoop and run Dual-Model Security Verification on any written Python files."""
     if runtime.engine.is_revoked(runtime.token.token_id):
         print("[info] Previous capability token was revoked; issuing a fresh token.", file=out)
         refresh_chat_token(runtime)
@@ -428,8 +548,20 @@ def run_chat_task(runtime: ChatRuntime, task: str, *, out: TextIO = sys.stdout) 
         summary = runtime.loop.run(session, task, source_trust="TRUSTED", auto_sync_wiki=False)
         print_agent_summary(summary, out=out)
         runtime.tasks_completed += 1
-        # Keep token in sync if session attenuated/replaced it
         runtime.token = session.active_token
+
+        if runtime.reviewer_enabled:
+            written_py_files = _extract_written_python_files(summary, runtime.workspace_dir)
+            for py_file in written_py_files:
+                loop_res = runtime.dual_reviewer.run_verified_coding_loop(
+                    py_file,
+                    task_description=task,
+                    workspace_dir=runtime.workspace_dir,
+                    coder_provider=runtime.provider,
+                    coder_model=runtime.model,
+                    auto_repair=runtime.auto_repair_enabled,
+                )
+                print(DualModelReviewer.format_verdict_for_user(loop_res), file=out)
     except CanaryTripwireError as exc:
         print(format_security_error(exc), file=out)
         print("[info] Canary tripwire fired; token revoked. A new token will be issued on the next task.", file=out)
@@ -478,10 +610,14 @@ def run_interactive_chat(
 ) -> int:
     """Run the interactive chat REPL until ``/quit`` or EOF."""
     if banner:
-        print("=== ActiveSecHarness Interactive Chat (Ring-3) ===", file=output_stream)
-        print(f"Provider: {runtime.provider} | Model: {runtime.model}", file=output_stream)
+        print("=== ActiveSecHarness Interactive Chat (Ring-3 + Dual-Model Verifier) ===", file=output_stream)
+        print(
+            f"Coder: {runtime.provider}/{runtime.model} | "
+            f"Reviewer: {runtime.dual_reviewer.reviewer_provider}/{runtime.dual_reviewer.reviewer_model}",
+            file=output_stream,
+        )
         print(f"Workspace: {runtime.workspace_dir}", file=output_stream)
-        print("Commands: /status  /wiki  /quit", file=output_stream)
+        print("Commands: /status  /models  /test  /learn  /wiki  /quit", file=output_stream)
         if runtime.provider == "ollama" and not runtime.digest_pinning_enabled:
             print(
                 "[residual_risk] Ollama model digest pinning is not configured "
@@ -498,11 +634,34 @@ def run_interactive_chat(
         if cmd.kind == "quit":
             break
         if cmd.kind == "unknown":
-            print(f"[error] Unknown command '{cmd.payload}'. Try /status, /wiki, /quit.", file=output_stream)
+            print(
+                f"[error] Unknown command '{cmd.payload}'. Try /status, /models, /test, /learn, /wiki, /quit.",
+                file=output_stream,
+            )
             continue
         if cmd.kind == "status":
             for line in status_lines(runtime):
                 print(line, file=output_stream)
+            continue
+        if cmd.kind == "models":
+            handle_models_command(runtime, cmd.payload, out=output_stream)
+            continue
+        if cmd.kind == "learn":
+            print(runtime.user_wiki_manager.format_terminal_summary(), file=output_stream)
+            continue
+        if cmd.kind == "test":
+            py_files = sorted(Path(runtime.workspace_dir).glob("*.py"))
+            if not py_files:
+                print("[test] No Python files found in workspace.", file=output_stream)
+                continue
+            for py_f in py_files:
+                rep = runtime.code_verifier.verify_python_file(str(py_f), workspace_dir=runtime.workspace_dir)
+                state = "APPROVED (SAFE)" if rep.approved_for_execution else "BLOCKED (UNSAFE)"
+                print(
+                    f"[test:{py_f.name}] {state} via SoD sub-agent {rep.sod_sub_agent_id} "
+                    f"(ast_findings={len(rep.ast_findings)}, probes={len(rep.probe_outcomes)})",
+                    file=output_stream,
+                )
             continue
         if cmd.kind == "wiki":
             ok = sync_wiki_for_runtime(runtime, quiet=False)
@@ -532,6 +691,9 @@ def run_scripted_chat(
     provider: str = "openrouter",
     model: Optional[str] = None,
     max_steps: int = DEFAULT_CHAT_MAX_STEPS,
+    reviewer_enabled: bool = True,
+    auto_repair_enabled: bool = True,
+    user_wiki_dir: Optional[str] = None,
     transport_func=None,
     api_key: Optional[str] = "scripted-test-key",
     sync_wiki_on_exit: bool = False,
@@ -544,6 +706,9 @@ def run_scripted_chat(
         provider=provider,
         model=model,
         max_steps=max_steps,
+        reviewer_enabled=reviewer_enabled,
+        auto_repair_enabled=auto_repair_enabled,
+        user_wiki_dir=user_wiki_dir,
         transport_func=transport_func,
         api_key=api_key,
         skip_provider_probe=True,
@@ -726,13 +891,30 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--provider",
         choices=("openrouter", "ollama"),
         default="ollama",
-        help="Model provider for --chat (default: ollama).",
+        help="Model provider for --chat coder (default: ollama).",
     )
     parser.add_argument(
         "--model",
         type=str,
         default=None,
-        help="Optional model identifier override (must be allowlisted / installed).",
+        help="Optional coder model identifier override (must be allowlisted / installed).",
+    )
+    parser.add_argument(
+        "--reviewer-provider",
+        choices=("openrouter", "ollama"),
+        default="openrouter",
+        help="Second reviewer model provider (default: openrouter).",
+    )
+    parser.add_argument(
+        "--reviewer-model",
+        type=str,
+        default=None,
+        help="Optional reviewer model identifier override.",
+    )
+    parser.add_argument(
+        "--no-auto-repair",
+        action="store_true",
+        help="Disable automatic self-healing Fix-Test-Verify repair loop when unsafe code is detected.",
     )
     parser.add_argument(
         "--workspace",
@@ -783,6 +965,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 provider=args.provider,
                 model=args.model,
                 max_steps=args.max_steps,
+                reviewer_provider=args.reviewer_provider,
+                reviewer_model=args.reviewer_model,
+                auto_repair_enabled=not args.no_auto_repair,
             )
             return run_interactive_chat(
                 runtime,
