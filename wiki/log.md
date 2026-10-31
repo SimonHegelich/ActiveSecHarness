@@ -265,3 +265,20 @@ Append-only chronological record of security architecture updates, AST audits, a
 - **Components Audited:** `agent_loop`, `archive_guard`, `audit_log`, `canary_guard`, `capability_token`, `code_verifier`, `credential_guard`, `deobfuscator`, `dual_model_reviewer`, `malware_guard`, `model_gateway`, `network_guard`, `sandbox_guard`, `security_kernel`, `tool_registry`, `user_wiki_manager`, `wiki_manager`
 - **Artifacts Updated:** `wiki/SECURITY_LEDGER.md`, `wiki/components/*.md`
 - **Runtime Telemetry (`agent_loop:telemetry-agent`):** 1 events (allowed=1, blocked=0, canary_alerts=0, vectors=`NONE`, head_hash=`1752f70373357a42`)
+
+## [2026-10-31] LotLImmune Phase 1B | Comparative Defense Benchmark Suite
+
+- **Status:** RUN COMPLETE (offline fixtures; LLM-Judge is an explicit heuristic stub)
+- **Module:** `src/activesec/benchmark/` (`fixtures.py`, `benchmark_suite.py`)
+- **Regimes:** `unguarded`, `regex`, `llm_judge` (stub), `activesec_ring0` (real Ring-0 APIs + thin adapters)
+- **Fixtures:** 17 attack + 8 benign across Domains A–F
+- **Headline:** Unguarded ABR=0.000; Regex ABR≈0.529; LLM-Judge-stub ABR≈0.647; ActiveSec Ring-0 ABR=1.000 / FPR=0.000
+- **Artifact:** `results/lotlimmune_benchmark.json` (exported to papermachineclip `LotLImmune/data/` + figures)
+- **Stub note:** `llm_judge` does not call Ollama/OpenRouter; latency floor 320 ms; blind spots documented in suite docstring and LotLImmune wiki decision log.
+
+## [2026-10-31] wiki_sync | Verified 17 Components (65 Adversarial Test Vectors)
+
+- **Status:** ALL PASSED & AST CLEAN
+- **Components Audited:** `agent_loop`, `archive_guard`, `audit_log`, `canary_guard`, `capability_token`, `code_verifier`, `credential_guard`, `deobfuscator`, `dual_model_reviewer`, `malware_guard`, `model_gateway`, `network_guard`, `sandbox_guard`, `security_kernel`, `tool_registry`, `user_wiki_manager`, `wiki_manager`
+- **Artifacts Updated:** `wiki/SECURITY_LEDGER.md`, `wiki/components/*.md`
+- **Runtime Telemetry (`agent_loop:telemetry-agent`):** 1 events (allowed=1, blocked=0, canary_alerts=0, vectors=`NONE`, head_hash=`94ccd1bb58a174bd`)

@@ -67,3 +67,4 @@ Every component in `ActiveSecHarness` is bound by three automated invariants:
 - **[`wiki/vectors/domain_d_credentials.md`](vectors/domain_d_credentials.md)** — Domain D: Password Entropy, Dictionary Attacks & Secret DLP
 - **[`wiki/vectors/domain_e_sandbox.md`](vectors/domain_e_sandbox.md)** — Domain E: Namespace Isolation, Seccomp & Resource Limits
 - **[`wiki/vectors/domain_f_cognitive.md`](vectors/domain_f_cognitive.md)** — Domain F: Human Social Engineering & Indirect Prompt Injection
+- **[`wiki/vectors/lotlimmune_phase1b.md`](vectors/lotlimmune_phase1b.md)** — LotLImmune Phase 1B comparative defense benchmark (Domains A–F × 4 regimes)
