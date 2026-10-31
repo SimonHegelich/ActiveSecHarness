@@ -1,6 +1,6 @@
-# 04 – Base Harness, Model Strategy (Pentesting & Refusals) & TelosLines Evolution
+# 04 – Model Routing & Provider Security
 
-This document outlines the minimal Python base harness architecture, our multi-model routing strategy to overcome commercial AI safety refusals during legitimate cybersecurity work, and the integration of **TelosLines** for continuous self-hardening.
+This document outlines the minimal Python base harness architecture, the multi-model routing strategy for legitimate cybersecurity work, and the provider security boundaries that keep cloud and local inference inside Ring 0.
 
 ---
 
@@ -42,12 +42,11 @@ ActiveSecHarness/
 │       ├── sovereign/                # Ring-1 Human Interface & Social-Engineering Defense
 │       │   ├── deobfuscator.py       # Base64/Hex/Script/Unicode De-Obfuscation
 │       │   └── risk_explainer.py     # Context-Isolated "Explain-Before-Sudo" Evaluator
-│       ├── harness/                  # Ring-2 & Ring-3 Agent Execution Loop
-│       │   ├── agent_loop.py         # Minimal Object-Oriented Agent Loop
-│       │   ├── model_router.py       # Role-Based Multi-Model Router
-│       │   └── pentest_lab.py        # Ephemeral Network/Container Lab Manager
-│       └── telos_bridge/             # Self-Learning Interface for TelosLines
-│           └── telemetry_bus.py      # Structured Security Event & Near-Miss Collector
+│       └── harness/                  # Ring-2 & Ring-3 Agent Execution Loop
+│           ├── agent_loop.py         # Minimal Object-Oriented Agent Loop
+│           ├── model_gateway.py      # Ring-0 OpenRouter & Local Ollama Gateway
+│           ├── model_router.py       # Role-Based Multi-Model Router
+│           └── pentest_lab.py        # Ephemeral Network/Container Lab Manager
 ├── tools/
 │   └── wiki_sync.py                  # Automated Security Test Runner & Karpathy Wiki Compiler
 └── tests/
@@ -92,21 +91,11 @@ flowchart TD
 
 ---
 
-## 3. TelosLines Integration & Closed-Loop Self-Hardening
+## 3. Provider Security Boundaries
 
-```mermaid
-flowchart LR
-    Attack["1. Attack Vector / Pentest Finding / Near-Miss"] --> Intercept["2. Ring-0 Telemetry Bus"]
-    Intercept --> Telos["3. TelosLines Analysis & Rule Synthesis"]
-    Telos --> Proposal["4. Candidate Defense Patch
-    (New YARA Rule, AST Filter, Seccomp Profile, or Code Fix)"]
-    Proposal --> SandboxVerify["5. Adversarial Verification in Red-Team Lab
-    (Blocks Attack + Zero False-Positive Regression)"]
-    SandboxVerify --> SudoPromote["6. Ring-1 Human Sudo Ceremony"]
-    SudoPromote --> WikiUpdate["7. Ring-0 Promotion & Automated Karpathy Wiki Update"]
-```
+Model text is untrusted data. Every inference call is mediated by the Ring-0 `ModelGateway` before any tool execution:
 
-1. **Structured Telemetry:** Every blocked attack or red-team finding is recorded as a structured event trace.
-2. **Rule & Patch Synthesis:** TelosLines synthesizes candidate YARA rules, AST command filters, or code patches in a staging area.
-3. **Adversarial Verification:** The Red-Team agent attempts to bypass the candidate defense inside the ephemeral lab while the component security test suite verifies zero regressions.
-4. **Sudo Promotion & Wiki Sync:** Verified rules are promoted to Ring 0 via a Ring-1 `sudo` ceremony, and `tools/wiki_sync.py` automatically updates the Karpathy Security Wiki.
+1. **Cloud provider lock-down:** OpenRouter traffic uses TLS 1.3, is pinned to `openrouter.ai`, is restricted to an explicit model allowlist, and sends `provider.data_collection = deny` with fallbacks disabled.
+2. **Local loopback only:** Ollama is accepted only at `http://127.0.0.1:11434`. Management endpoints (`/api/pull`, `/api/create`, `/api/delete`, `/api/push`, `/api/copy`) are rejected. Optional SHA-256 digest pins bind a role to a specific model blob.
+3. **Pentest role binding:** A Role-3 security model may be invoked together with execution tools only when a cryptographically verified pentest capability token limits the session to an isolated lab namespace.
+4. **Audit record:** Guard denials and mediated model calls are appended to the hash-chained audit log. `tools/wiki_sync.py` records component security-test status and runtime telemetry from that log.

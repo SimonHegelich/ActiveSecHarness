@@ -4,7 +4,7 @@ This document specifies the five deterministic Ring-0 security gateways in **Act
 
 ## Core Principle: Deterministic Enforcement Before AI Judgment
 
-Large language models excel at contextual reasoning and synthesizing novel defenses, but they are probabilistic and susceptible to prompt injection.
+Large language models excel at contextual reasoning, but they are probabilistic and susceptible to prompt injection.
 
 Physical and mathematical security invariants (Is this archive a decompression bomb? Does this file match a malware signature? Is this password vulnerable to dictionary/mutation attacks? Is this TLS connection verified? Is this subprocess confined to its namespace?) must **never** be delegated to an LLM. They are enforced deterministically by **Ring-0 code modules**.
 
@@ -30,7 +30,7 @@ flowchart LR
     Dispatcher --> G4
     G1 & G2 & G3 & G4 --> G5
     G5 --> Exec["Safe Sandboxed Execution"]
-    G1 & G2 & G3 & G4 & G5 -.->|"On Violation: Hard Block + Event"| Telemetry["Security Event Bus (for TelosLines)"]
+    G1 & G2 & G3 & G4 & G5 -.->|"On Violation: Hard Block + Event"| Telemetry["Hash-Chained Audit Log"]
 ```
 
 ---

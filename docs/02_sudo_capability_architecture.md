@@ -37,7 +37,7 @@ flowchart TB
         R1_Desc["Human Operator (Root of Trust) + Isolated Social-Engineering Guard
         - Sole authority for Root Sudo Grants
         - De-Obfuscation & Explain-Before-Sudo Ceremony
-        - Promotion of verified Ring-0 Updates (TelosLines)"]
+        - Human promotion of reviewed Ring-0 updates"]
     end
 
     subgraph Ring2 [Ring 2: Privileged Orchestrators & Specialized Agents]
@@ -148,7 +148,7 @@ sequenceDiagram
     else Context clean or operation strictly local/permitted
         Kernel->>Guards: 4. Deterministic Pre-Checks (AST-Shell, ZipBomb, AV, Password, TLS)
         alt Deterministic Guard triggers
-            Guards-->>Kernel: HARD REJECT + Security Event to TelosLines
+            Guards-->>Kernel: HARD REJECT + Security Event to Audit Log
             Kernel-->>Agent: Blocked with deterministic reason
         else Token insufficient but Sudo escalation eligible
             Kernel->>SEGuard: 5. De-Obfuscation + Explain-Before-Sudo Ceremony

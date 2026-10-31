@@ -1,7 +1,7 @@
 """Strict security exception hierarchy for ActiveSecHarness.
 
 All security violations fail closed by raising a specific subclass of ActiveSecError
-carrying structured threat vector metadata for audit logging and TelosLines telemetry.
+carrying structured threat vector metadata for the hash-chained audit log.
 """
 
 from __future__ import annotations

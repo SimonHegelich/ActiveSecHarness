@@ -1,10 +1,10 @@
 # ActiveSecHarness
 
-**An adaptive, open-source coding harness with an active security architecture (`sudo`-inspired capability chains, deterministic Ring-0 interceptors, component security testing, and self-evolving defense via TelosLines).**
+**An open-source coding harness with an active security architecture (`sudo`-inspired capability chains, deterministic Ring-0 interceptors, and component security testing).**
 
 ---
 
-## 1. Core Philosophy: "Living off the Land" (LotL) & Active Immune Defense
+## 1. Core Philosophy: "Living off the Land" (LotL) & Active Defense
 
 By design, an AI coding harness possesses the exact primitives an attacker uses after initial compromise for **Living off the Land (LotL)**:
 - Arbitrary shell execution (`bash`, `python`, `curl`, `git`, `openssl`, `tar`)
@@ -23,7 +23,7 @@ By design, an AI coding harness possesses the exact primitives an attacker uses 
 2. **The `sudo` Principle & Cryptographic Capability Chains:** In principle, *anything* is possible within the harness (including offensive penetration testing inside isolated target labs or system-level actions), **but nothing is permitted implicitly or globally across all agents**. All authority originates from the human user (*Root of Trust*). Automated delegation to sub-agents requires cryptographically signed, time-bound, and strictly scoped **Capability Chains** with monotonic *Attenuation* (permissions can only be narrowed down the chain, never expanded) and continuous per-call verification.
 3. **Human Protection Against Social Engineering:** Because the human user is a critical attack vector (e.g., via trojanized issues, copy-paste traps, or obfuscated commands), an independent, context-isolated *Cognitive & De-Obfuscation Guard* protects the operator during `sudo` ceremonies.
 4. **Open Source as a Security Guarantee:** No *Security through Obscurity*. Every guard, policy engine, capability verifier, and wiki security assessment is open-source, deterministic, and continuously audited.
-5. **Evolution via TelosLines & Dedicated Red-Teaming:** The harness provides the foundation for **TelosLines** and specialized security models (free from artificial refusal bottlenecks, safely contained by Ring-0 sandboxes) so the system continuously learns from attack traces and hardens itself.
+5. **Contained Red-Team Models:** Specialized security models support penetration testing inside Ring-0 sandboxes and scoped capability leases. Deterministic guards and the capability chain contain every tool call, including when a model is hosted without a commercial refusal layer.
 
 ---
 
@@ -43,11 +43,10 @@ flowchart TD
         SandboxEnf["Sandbox Enforcer (bwrap / Rootless Container / seccomp / cgroups)"]
     end
 
-    subgraph Ring2_3 [Ring 2 & 3: Agent Execution & Evolution]
+    subgraph Ring2_3 [Ring 2 & 3: Agent Execution]
         Orchestrator["Orchestrator Agent"]
         CodingWorker["Coding Agent (Ring 3: Minimal Capabilities)"]
         PentestWorker["Pentest / Red-Team Agent (Ring 2: Scoped Sudo Lease)"]
-        TelosLines["TelosLines (Self-Learning & Policy Evolution)"]
     end
 
     User -->|"Intent / Sudo Grant"| SEGuard
@@ -61,8 +60,6 @@ flowchart TD
     CapEngine --> TaintTracker
     TaintTracker --> DetGuards
     DetGuards --> SandboxEnf
-    SandboxEnf -->|"Telemetry & Security Events"| TelosLines
-    TelosLines -->|"Proposed Rules/Patches (via Sudo)"| SEGuard
 ```
 
 ---
@@ -76,7 +73,7 @@ ActiveSecHarness maintains both architectural specifications (`docs/`) and a sel
 | **[`docs/01_threat_taxonomy.md`](docs/01_threat_taxonomy.md)** | **Threat Taxonomy:** Comprehensive classification across 6 domains (A: LotL / Tool Misuse, B: Artifact/Archive Vectors incl. ZipBombs & Malware, C: Network & Supply Chain, D: Passwords/Dictionary Attacks & Secrets, E: Sandbox Isolation, F: Human Social Engineering & AI Prompt Injection). |
 | **[`docs/02_sudo_capability_architecture.md`](docs/02_sudo_capability_architecture.md)** | **`sudo` & Capability Architecture:** Privilege Rings (Ring 0–3), cryptographic capability tokens, monotonic attenuation rules, zero-trust per-call verification, and the *Explain-Before-Sudo* social-engineering defense. |
 | **[`docs/03_deterministic_guards_spec.md`](docs/03_deterministic_guards_spec.md)** | **Deterministic Security Gateways:** Technical specifications for `ArchiveGuard`, `MalwareGuard`, `CredentialGuard`, `NetworkGuard`, and `SandboxGuard`. |
-| **[`docs/04_model_and_evolution_roadmap.md`](docs/04_model_and_evolution_roadmap.md)** | **Base Harness, Model Strategy & TelosLines Roadmap:** Minimal Python core architecture (`mini-swe-agent` style), multi-model routing for penetration testing without refusal bottlenecks, and the TelosLines self-learning interface. |
+| **[`docs/04_model_routing_and_provider_security.md`](docs/04_model_routing_and_provider_security.md)** | **Model Routing & Provider Security:** Minimal Python core architecture (`mini-swe-agent` style), role-based multi-model routing for penetration testing, and Ring-0 provider boundaries for cloud and local inference. |
 | **[`wiki/INDEX.md`](wiki/INDEX.md)** | **Karpathy Security Wiki Root:** Living knowledge base compiled and updated automatically from component security docstrings and dedicated security test suites. |
 | **[`wiki/SECURITY_LEDGER.md`](wiki/SECURITY_LEDGER.md)** | **Automated Component Security Ledger:** Live matrix of all components, their risk ratings, mitigated attack vectors, and latest adversarial test verification status. |
 

@@ -48,7 +48,6 @@ DEFAULT_COMPROMISED_DICTIONARY: FrozenSet[str] = frozenset(
         "harness",
         "activesec",
         "activesecharness",
-        "teloslines",
         "cybersecurity",
         "pentest",
         "developer",
@@ -118,7 +117,7 @@ class CredentialGuard(SecureComponent):
         *,
         policy: PasswordPolicy | None = None,
         extra_dictionary_words: Iterable[str] = (),
-        project_context_words: Iterable[str] = ("activesec", "harness", "telos", "simon"),
+        project_context_words: Iterable[str] = ("activesec", "harness", "simon"),
     ) -> None:
         self._policy: PasswordPolicy = policy if policy is not None else PasswordPolicy()
         normalized_extra = {w.strip().lower() for w in extra_dictionary_words if len(w.strip()) >= 3}

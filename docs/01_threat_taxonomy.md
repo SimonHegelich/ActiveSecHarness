@@ -64,7 +64,7 @@ No external memory-corruption exploit is needed here—the agent misuses regular
   - **Immutable Ring 0:** The harness source code, policy database, and security guards reside outside the writable workspace mount (or are mounted `read-only` inside the agent's namespace).
   - Cryptographic integrity verification (SHA-256 manifest + signature) of all guard modules at startup and prior to privileged operations.
 - **Dynamic / `sudo` Layer:**
-  - When **TelosLines** proposes self-improvements or new security rules, changes are written to an isolated staging area. Promotion into Ring 0 requires passing an automated adversarial test suite plus an explicit human Ring-1 `sudo` ceremony.
+  - Updates to Ring-0 guards, policy, or detection rules are prepared outside the agent workspace. Promotion requires a passing adversarial test suite and an explicit human Ring-1 `sudo` ceremony.
 
 ### A.4 Persistence Injection (Host & Workspace Persistence)
 - **Attack Vector:** Planting backdoors in files executed outside the agent's lifecycle: `.bashrc`, `.profile`, `~/.ssh/authorized_keys`, `.git/hooks/*`, `.vscode/tasks.json`, `.cursor/hooks.json`, `Makefile`, or CI/CD workflows (`.github/workflows/*`).
@@ -91,7 +91,7 @@ Agents download archives, unpack dependencies, inspect external repositories, or
     - Maximum total uncompressed volume per archive (e.g., `max_total_uncompressed_bytes = 500 MB`).
     - Maximum file / inode count (e.g., `max_file_count = 10,000`).
     - Maximum recursion/nesting depth (e.g., `max_nesting_depth = 2`).
-  - Exceeding any threshold immediately aborts the stream, purges the quarantine directory, and emits a security event to TelosLines.
+  - Exceeding any threshold immediately aborts the stream, purges the quarantine directory, and emits a security event to the hash-chained audit log.
 
 ### B.2 Archive Traversal (Zip-Slip, Symlink & Hardlink Attacks)
 - **Attack Vector:**
@@ -261,11 +261,11 @@ Even the strongest technical sandbox fails if the agent is hijacked (**Prompt In
 
 ## Summary: Defense-in-Depth Matrix
 
-| Vector Domain | Deterministic Barrier (Ring 0) | Dynamic `sudo` & Model Layer (Ring 1–2) | Self-Learning Input for TelosLines |
-| :--- | :--- | :--- | :--- |
-| **A: LotL / Harness** | AST shell parser, clean environment, read-only Ring 0 | Time- and scope-bound binary capabilities | Detection of novel LOLBin chains & flag combinations |
-| **B: Files & Archives** | Streaming ZipBomb guard, Zip-Slip check, ClamAV + YARA in quarantine | Isolated analysis sandbox for suspicious artifacts | Automated synthesis of new YARA/signature rules |
-| **C: Network & Supply Chain** | TLS 1.3 enforcement, socket IP blocker (Anti-SSRF), DLP filter | Scoped `sudo` tokens for pentest labs & package installs | Reputation tracking for domains & packages |
-| **D: Passwords & Secrets** | `zxcvbn` + de-mangling + dictionary Bloom filter, pre-read secret redaction | CSPRNG secret broker instead of cleartext exposure | Expansion of secret patterns & password mutation rules |
-| **E: Sandbox** | `bwrap` namespaces, `seccomp-bpf`, `cgroups v2` limits, no socket sharing | MicroVM / rootless containers for high-risk pentests | Refinement of `seccomp` profiles upon escape attempts |
-| **F: Human & AI** | Context taint tracking, de-obfuscation, anti-fatigue design | Independent *Explain-Before-Sudo* guard & friction scaling | Training detectors against new prompt-injection & SE patterns |
+| Vector Domain | Deterministic Barrier (Ring 0) | Dynamic `sudo` & Model Layer (Ring 1–2) |
+| :--- | :--- | :--- |
+| **A: LotL / Harness** | AST shell parser, clean environment, read-only Ring 0 | Time- and scope-bound binary capabilities |
+| **B: Files & Archives** | Streaming ZipBomb guard, Zip-Slip check, ClamAV + YARA in quarantine | Isolated analysis sandbox for suspicious artifacts |
+| **C: Network & Supply Chain** | TLS 1.3 enforcement, socket IP blocker (Anti-SSRF), DLP filter | Scoped `sudo` tokens for pentest labs & package installs |
+| **D: Passwords & Secrets** | `zxcvbn` + de-mangling + dictionary Bloom filter, pre-read secret redaction | CSPRNG secret broker instead of cleartext exposure |
+| **E: Sandbox** | `bwrap` namespaces, `seccomp-bpf`, `cgroups v2` limits, no socket sharing | MicroVM / rootless containers for high-risk pentests |
+| **F: Human & AI** | Context taint tracking, de-obfuscation, anti-fatigue design | Independent *Explain-Before-Sudo* guard & friction scaling |
