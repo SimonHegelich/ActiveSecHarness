@@ -16,9 +16,9 @@ This ledger is automatically compiled and verified by `WikiManager` ([`src/activ
 | **[`code_verifier`](components/code_verifier.md)** | Ring 0 | `A.1`, `B.1`, `B.2`, `B.4`, `D.1`, `D.3`, `E.1`, `F.3` | `CLEAN` | **VERIFIED** (3/3 passed) | `4aa68dae80` |
 | **[`credential_guard`](components/credential_guard.md)** | Ring 0 | `D.1`, `D.2`, `D.3` | `CLEAN` | **VERIFIED** (3/3 passed) | `7214e8f0d0` |
 | **[`deobfuscator`](components/deobfuscator.md)** | Ring 1 | `B.4`, `F.1`, `A.1` | `CLEAN` | **VERIFIED** (3/3 passed) | `16d147edb9` |
-| **[`dual_model_reviewer`](components/dual_model_reviewer.md)** | Ring 2 | `A.1`, `B.1`, `B.2`, `D.1`, `F.1`, `F.3` | `CLEAN` | **VERIFIED** (1/1 passed) | `9adcd9b660` |
+| **[`dual_model_reviewer`](components/dual_model_reviewer.md)** | Ring 2 | `A.1`, `B.1`, `B.2`, `D.1`, `F.1`, `F.3` | `CLEAN` | **VERIFIED** (2/2 passed) | `461929bf76` |
 | **[`malware_guard`](components/malware_guard.md)** | Ring 0 | `B.3`, `B.4`, `F.2` | `CLEAN` | **VERIFIED** (4/4 passed) | `d8ab2f93f3` |
-| **[`model_gateway`](components/model_gateway.md)** | Ring 0 | `A.1`, `A.2`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.2`, `F.2` | `CLEAN` | **VERIFIED** (8/8 passed) | `5db2c99811` |
+| **[`model_gateway`](components/model_gateway.md)** | Ring 0 | `A.1`, `A.2`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.2`, `F.2` | `CLEAN` | **VERIFIED** (8/8 passed) | `33a8733c25` |
 | **[`network_guard`](components/network_guard.md)** | Ring 0 | `C.1`, `C.2`, `C.3` | `CLEAN` | **VERIFIED** (4/4 passed) | `12291c0db4` |
 | **[`sandbox_guard`](components/sandbox_guard.md)** | Ring 0 | `A.1`, `A.2`, `E.1`, `E.2`, `E.3` | `CLEAN` | **VERIFIED** (3/3 passed) | `dc16771e6e` |
 | **[`security_kernel`](components/security_kernel.md)** | Ring 0 | `A.1`, `A.3`, `A.4`, `B.1`, `B.2`, `B.3`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.1`, `F.1`, `F.2`, `F.3` | `CLEAN` | **VERIFIED** (3/3 passed) | `10640f9200` |
@@ -31,5 +31,13 @@ This ledger is automatically compiled and verified by `WikiManager` ([`src/activ
 ## Summary Metrics
 
 - **Registered Security Components:** 17
-- **Dedicated Adversarial Test Vectors Executed:** 64
+- **Dedicated Adversarial Test Vectors Executed:** 65
 - **Overall Posture:** ALL COMPONENTS VERIFIED
+
+---
+
+## Latest Runtime Security Telemetry (`agent_loop:telemetry-agent`)
+
+- **Audit Chain Verification:** `VERIFIED` (Head SHA-256: `1752f70373357a42`)
+- **Total Mediated Events:** 1 (Allowed: 1, Blocked: 0, Canary Tripwires: 0)
+- **Triggered Threat Vectors:** `NONE`

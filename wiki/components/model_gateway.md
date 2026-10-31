@@ -12,7 +12,7 @@
 | **Title** | Ring-0 Hardened OpenRouter & Local Ollama Model Gateway |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `A.1`, `A.2`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.2`, `F.2` |
-| **Source File** | [`src/activesec/harness/model_gateway.py`](../../src/activesec/harness/model_gateway.py) (`sha256:5db2c998110f`) |
+| **Source File** | [`src/activesec/harness/model_gateway.py`](../../src/activesec/harness/model_gateway.py) (`sha256:33a8733c252f`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_model_gateway.py`](../../tests/security/test_sec_model_gateway.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
 | **Adversarial Security Verification** | **VERIFIED (PASS)** (8 test vectors) |

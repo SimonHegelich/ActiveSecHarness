@@ -12,10 +12,10 @@
 | **Title** | Ring-2 Dual-Model Security Reviewer & Self-Healing Repair Orchestrator |
 | **Privilege Ring** | **Ring 2** |
 | **Mitigated Threat Vectors** | `A.1`, `B.1`, `B.2`, `D.1`, `F.1`, `F.3` |
-| **Source File** | [`src/activesec/harness/dual_model_reviewer.py`](../../src/activesec/harness/dual_model_reviewer.py) (`sha256:9adcd9b6609b`) |
+| **Source File** | [`src/activesec/harness/dual_model_reviewer.py`](../../src/activesec/harness/dual_model_reviewer.py) (`sha256:461929bf762f`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_dual_model_reviewer.py`](../../tests/security/test_sec_dual_model_reviewer.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
-| **Adversarial Security Verification** | **VERIFIED (PASS)** (1 test vectors) |
+| **Adversarial Security Verification** | **VERIFIED (PASS)** (2 test vectors) |
 
 ---
 
@@ -39,6 +39,7 @@ Combines deterministic LLM-independent CodeVerifier checks (Stage A) with an ind
 | Test Function | Verified Adversarial Vector & Invariant | Status |
 | :--- | :--- | :--- |
 | `test_sec_dual_model_reviewer_blocks_unsafe_code_and_self_heals` | [Vector B.1, B.2 & F.1: Dual-Model Review & Self-Healing Loop] Blocks unsafe extractall(), explains in plain language, escalates to OpenRouter fixer, and updates wiki_user/. | **PASS** |
+| `test_sec_dual_model_reviewer_offline_ollama_fallback_and_reference_remediation` | [Vector B.1, B.2 & F.1: Air-Gapped Local Ollama Repair Fallback] When OpenRouter is unavailable and weak local model fails to fix extractall(), certified reference remediation heals the file and updates wiki_user/. | **PASS** |
 
 ---
 
