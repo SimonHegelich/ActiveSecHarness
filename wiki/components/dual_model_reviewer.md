@@ -12,7 +12,7 @@
 | **Title** | Ring-2 Dual-Model Security Reviewer & Self-Healing Repair Orchestrator |
 | **Privilege Ring** | **Ring 2** |
 | **Mitigated Threat Vectors** | `A.1`, `B.1`, `B.2`, `D.1`, `F.1`, `F.3` |
-| **Source File** | [`src/activesec/harness/dual_model_reviewer.py`](../../src/activesec/harness/dual_model_reviewer.py) (`sha256:461929bf762f`) |
+| **Source File** | [`src/activesec/harness/dual_model_reviewer.py`](../../src/activesec/harness/dual_model_reviewer.py) (`sha256:35f168a38d01`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_dual_model_reviewer.py`](../../tests/security/test_sec_dual_model_reviewer.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
 | **Adversarial Security Verification** | **VERIFIED (PASS)** (2 test vectors) |

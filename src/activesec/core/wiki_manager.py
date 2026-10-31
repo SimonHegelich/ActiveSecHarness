@@ -209,6 +209,7 @@ class WikiManager(SecureComponent):
             import activesec.core.user_wiki_manager  # noqa: F401
             import activesec.guards.code_verifier  # noqa: F401
             import activesec.harness.dual_model_reviewer  # noqa: F401
+            import activesec.harness.test_synthesizer  # noqa: F401
         except ImportError:
             pass
 
