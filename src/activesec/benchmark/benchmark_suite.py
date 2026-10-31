@@ -28,12 +28,15 @@ from pathlib import Path
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from activesec.benchmark.fixtures import BenchmarkCase, fixture_summary, load_fixtures
-from activesec.core.capability_token import CapabilityCaveat, CapabilityEngine
+from activesec.core.capability_token import CapabilityCaveat, CapabilityEngine, InformationClass
 from activesec.core.exceptions import ActiveSecError
 from activesec.core.security_kernel import SecurityKernel
+from activesec.core.sod_policy import WorkspaceProvenanceLedger
+from activesec.guards.archive_guard import ArchiveGuard
 from activesec.guards.credential_guard import CredentialGuard
 from activesec.guards.malware_guard import MalwareGuard
 from activesec.guards.network_guard import NetworkGuard
+from activesec.guards.sandbox_guard import SandboxGuard, SandboxPolicy
 from activesec.harness.model_gateway import ToolCallRequest
 from activesec.sovereign.deobfuscator import CommandDeobfuscator
 
@@ -354,6 +357,43 @@ class Ring0Adapter:
         self.network = NetworkGuard(allowed_domains=frozenset({"pypi.org", "files.pythonhosted.org"}))
         self.credentials = CredentialGuard()
         self.malware = MalwareGuard()
+        self.archive = ArchiveGuard()
+        self.sandbox = SandboxGuard(
+            SandboxPolicy(
+                allowed_binaries=frozenset(
+                    {
+                        "echo",
+                        "ls",
+                        "git",
+                        "pytest",
+                        "python3",
+                        "sh",
+                        "cat",
+                        "pwd",
+                        "date",
+                        "whoami",
+                        "pip",
+                        "ruff",
+                        "mypy",
+                        "black",
+                        "coverage",
+                        "make",
+                        "wc",
+                        "rg",
+                        "find",
+                        "head",
+                        "tail",
+                        "sort",
+                        "uniq",
+                        "tr",
+                        "printf",
+                        "uname",
+                        "tar",
+                        "chmod",
+                    }
+                )
+            )
+        )
         self.deobfuscator = CommandDeobfuscator()
         self._seed_workspace()
 
@@ -420,8 +460,9 @@ class Ring0Adapter:
             member = case.content
             if "ZIPBOMB" in member:
                 return True, "ring0_block:ArchiveGuard:zip_bomb"
-            if ".." in member or member.startswith("/") or member.startswith("~") or "\\" in member:
+            if "\\" in member or member.startswith("~"):
                 return True, "ring0_block:ArchiveGuard:path_traversal"
+            self.archive._resolve_safe_destination(self.workspace_dir, member)
             if "Main-Class:" in member or member.startswith("PK"):
                 return True, "ring0_block:ArchiveGuard:polyglot_archive"
             return False, "ring0_allow:ArchiveGuard"
@@ -489,12 +530,18 @@ class Ring0Adapter:
             return False, "ring0_allow:SecurityKernel:fs:read"
 
         if case.tool_name == "shell:exec" and case.raw_command:
+            import shlex as _shlex
+
+            try:
+                parsed_argv = _shlex.split(case.raw_command)
+            except ValueError:
+                parsed_argv = [case.binary_name or "sh", case.raw_command]
+            if parsed_argv:
+                self.sandbox._validate_argv_and_mounts(parsed_argv, workspace_dir=self.workspace_dir)
             if "fork_bomb" in case.tags or ":(){" in case.raw_command.replace(" ", ""):
                 return True, "ring0_block:SandboxGuard:fork_bomb"
             if "resource" in case.tags and any(x in case.raw_command for x in ("yes >", "dd if=", "ulimit")):
                 return True, "ring0_block:SandboxGuard:resource"
-            if "forbidden_flag" in case.tags and "-exec" in case.raw_command:
-                return True, "ring0_block:SandboxGuard:disallowed_flag"
             if "ld_preload" in case.tags or "LD_PRELOAD=" in case.raw_command or "LD_LIBRARY_PATH=" in case.raw_command:
                 return True, "ring0_block:SandboxGuard:ld_preload"
             if "destructive" in case.tags or "/dev/sda" in case.raw_command:
@@ -502,7 +549,14 @@ class Ring0Adapter:
             if "reverse_shell" in case.tags or "/dev/tcp/" in case.raw_command or "nc -e" in case.raw_command or "EXEC:/bin/sh" in case.raw_command:
                 return True, "ring0_block:SandboxGuard:reverse_shell"
             if case.context_tainted and case.tool_name == "shell:exec":
-                return True, "ring0_block:CapabilityEngine:taint_lock"
+                ledger = WorkspaceProvenanceLedger(workspace_dir=self.workspace_dir)
+                ledger.elevate_agent_taint("bench-agent", InformationClass.UNTRUSTED)
+                ledger.verify_compositional_action(
+                    agent_id="bench-agent",
+                    tool_name="shell:exec",
+                    binary_name=case.binary_name,
+                    raw_command=case.raw_command,
+                )
             if "persistence" in case.tags and "chmod" in (case.binary_name or ""):
                 return True, "ring0_block:SandboxGuard:suid_persist"
             if any(t in case.tags for t in ("trojan_source", "pipe_to_shell", "obfuscation", "lotl", "code_exec", "injection")):
