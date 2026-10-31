@@ -18,13 +18,18 @@ from dataclasses import dataclass
 from typing import Optional
 
 from activesec.core.audit_log import HashChainedAuditLog
-from activesec.core.capability_token import CapabilityEngine, CapabilityToken
+from activesec.core.capability_token import (
+    CapabilityEngine,
+    CapabilityToken,
+    InformationClass,
+)
 from activesec.core.component import ComponentSecurityAssessment, SecureComponent
 from activesec.core.exceptions import (
     ActiveSecError,
     CanaryTripwireError,
     CapabilityViolationError,
 )
+from activesec.core.sod_policy import WorkspaceProvenanceLedger
 from activesec.core.tool_registry import CertifiedToolRegistry
 from activesec.core.wiki_manager import RuntimeTelemetrySnapshot, WikiManager
 from activesec.guards.archive_guard import ArchiveGuard
@@ -65,6 +70,7 @@ class SecurityKernel(SecureComponent):
         deobfuscator: Optional[CommandDeobfuscator] = None,
         wiki_manager: Optional[WikiManager] = None,
         tool_registry: Optional[CertifiedToolRegistry] = None,
+        provenance_ledger: Optional[WorkspaceProvenanceLedger] = None,
     ) -> None:
         self._workspace_dir: str = os.path.realpath(workspace_dir)
         os.makedirs(self._workspace_dir, mode=0o700, exist_ok=True)
@@ -85,6 +91,9 @@ class SecurityKernel(SecureComponent):
         self._deobfuscator: CommandDeobfuscator = deobfuscator or CommandDeobfuscator()
         self._wiki_manager: WikiManager = wiki_manager or WikiManager()
         self._tool_registry: Optional[CertifiedToolRegistry] = tool_registry
+        self._provenance_ledger: WorkspaceProvenanceLedger = (
+            provenance_ledger or WorkspaceProvenanceLedger(workspace_dir=self._workspace_dir)
+        )
 
     @classmethod
     def security_assessment(cls) -> ComponentSecurityAssessment:
@@ -104,7 +113,8 @@ class SecurityKernel(SecureComponent):
             ),
             enforced_invariants=(
                 "Evaluates CanaryGuard tripwires on target paths, raw commands, and arguments before touching any resource, revoking the active token on violation.",
-                "Verifies CapabilityToken signatures, revocation state, TTL, call quota, path confinement, allowed binaries, and context_tainted status via CapabilityEngine.",
+                "Verifies CapabilityToken signatures, revocation state, TTL, call quota, path confinement, allowed binaries, and 5-level InformationClass taint lattice via CapabilityEngine.",
+                "Enforces Compositional Cross-Agent Separation of Duties via WorkspaceProvenanceLedger, tracking per-file provenance labels l(f) on workspace writes and propagating taint/sensitivity across collaborating agents.",
                 "Runs CommandDeobfuscator.inspect_command(..., fail_on_critical=True) on all shell:exec requests and rejects shell=True.",
                 "Scans files with MalwareGuard before fs:read or after fs:write/archive:extract, and enforces CredentialGuard DLP on both read (redaction) and write (blocking).",
                 "Appends an immutable, cryptographically signed AuditLogEntry for every allowed or blocked tool invocation.",
@@ -138,6 +148,10 @@ class SecurityKernel(SecureComponent):
     def tool_registry(self) -> Optional[CertifiedToolRegistry]:
         return self._tool_registry
 
+    @property
+    def provenance_ledger(self) -> WorkspaceProvenanceLedger:
+        return self._provenance_ledger
+
     def sync_runtime_wiki(
         self,
         *,
@@ -161,6 +175,8 @@ class SecurityKernel(SecureComponent):
         token: CapabilityToken,
         agent_id: str,
         context_tainted: bool = False,
+        information_class: Optional[InformationClass] = None,
+        call_nonce: Optional[str] = None,
         current_time: Optional[float] = None,
     ) -> ToolExecutionResult:
         """Mediate and execute a single ToolCallRequest through all Ring-0 guards."""
@@ -228,19 +244,40 @@ class SecurityKernel(SecureComponent):
                         candidate = tok if os.path.isabs(tok) else os.path.join(self._workspace_dir, tok)
                         self._canary_guard.check_path_access(candidate, active_token_id=token.token_id)
 
-            # 2. Verify CapabilityToken via CapabilityEngine
+            # 2. Verify CapabilityToken & 5-level IFC lattice via CapabilityEngine
+            agent_flow = self._provenance_ledger.get_agent_state(agent_id)
+            effective_info_class = information_class
+            if effective_info_class is None and agent_flow.information_class in (
+                InformationClass.DERIVED,
+                InformationClass.UNTRUSTED,
+            ):
+                effective_info_class = agent_flow.information_class
+
             self._capability_engine.verify_tool_call(
                 token=token,
                 agent_id=agent_id,
                 tool_name=request.tool_name,
                 target_path=target_path,
                 binary_name=binary_name,
+                raw_command=raw_command,
                 network_destination=net_dest,
                 context_tainted=context_tainted,
+                information_class=effective_info_class,
+                call_nonce=call_nonce,
                 current_time=current_time,
             )
 
-            # 3. Verify Tool Certification, Agent-Tool Qualification & Combinatorial SoD Policy
+            # 3. Verify Compositional Workspace Provenance SoD (cross-agent IFC)
+            self._provenance_ledger.verify_compositional_action(
+                agent_id=agent_id,
+                tool_name=request.tool_name,
+                target_path=target_path,
+                binary_name=binary_name,
+                raw_command=raw_command,
+                explicit_information_class=information_class,
+            )
+
+            # 4. Verify Tool Certification, Agent-Tool Qualification & Combinatorial SoD Policy
             if self._tool_registry is not None:
                 self._tool_registry.enforce_tool_call(
                     request,
@@ -249,12 +286,14 @@ class SecurityKernel(SecureComponent):
                     current_time=current_time,
                 )
 
-            # 4. Dispatch to deterministic guards based on tool_name
+            # 5. Dispatch to deterministic guards based on tool_name
             output, sanitized = self._dispatch_tool(
                 request=request,
                 token=token,
+                agent_id=agent_id,
                 target_path=target_path,
                 parsed_argv=parsed_argv,
+                information_class=information_class,
             )
 
         except ActiveSecError as exc:
@@ -311,8 +350,10 @@ class SecurityKernel(SecureComponent):
         *,
         request: ToolCallRequest,
         token: CapabilityToken,
+        agent_id: str,
         target_path: Optional[str],
         parsed_argv: list[str],
+        information_class: Optional[InformationClass] = None,
     ) -> tuple[str, bool]:
         if request.tool_name == "fs:read":
             if not target_path:
@@ -327,7 +368,16 @@ class SecurityKernel(SecureComponent):
                 raw_text = fh.read()
             self._canary_guard.check_stream_for_canaries(raw_text, active_token_id=token.token_id)
             redacted = self._credential_guard.redact_secrets(raw_text)
-            return (redacted, redacted != raw_text)
+            was_redacted = redacted != raw_text
+            inferred_class = information_class
+            if inferred_class is None and was_redacted:
+                inferred_class = InformationClass.SENSITIVE
+            self._provenance_ledger.record_file_read(
+                agent_id=agent_id,
+                path=real_path,
+                explicit_file_class=inferred_class,
+            )
+            return (redacted, was_redacted)
 
         if request.tool_name == "fs:write":
             if not target_path:
@@ -354,6 +404,12 @@ class SecurityKernel(SecureComponent):
                 except OSError:
                     pass
                 raise
+            self._provenance_ledger.record_file_write(
+                agent_id=agent_id,
+                path=real_path,
+                content=content,
+                explicit_class=information_class,
+            )
             return (f"Wrote {len(content)} bytes to {real_path}", False)
 
         if request.tool_name == "archive:extract":
@@ -379,6 +435,11 @@ class SecurityKernel(SecureComponent):
             try:
                 for ext_file in extracted_files:
                     self._malware_guard.scan_file(ext_file)
+                    self._provenance_ledger.record_file_write(
+                        agent_id=agent_id,
+                        path=ext_file,
+                        explicit_class=information_class or InformationClass.UNTRUSTED,
+                    )
             except ActiveSecError:
                 shutil.rmtree(real_dest, ignore_errors=True)
                 raise

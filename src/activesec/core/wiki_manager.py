@@ -205,6 +205,7 @@ class WikiManager(SecureComponent):
         import activesec.sovereign.deobfuscator  # noqa: F401
 
         try:
+            import activesec.core.sod_policy  # noqa: F401
             import activesec.core.tool_registry  # noqa: F401
             import activesec.core.user_wiki_manager  # noqa: F401
             import activesec.guards.code_verifier  # noqa: F401
