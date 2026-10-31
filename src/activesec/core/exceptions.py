@@ -72,3 +72,5 @@ class ToxicCombinationError(ActiveSecError):
     """Raised when an agent attempts to combine mutually exclusive tools violating Separation of Duties (SoD)."""
 
 
+class CodeSecurityVerificationError(ActiveSecError):
+    """Raised when generated application code fails deterministic AST checks, sandbox probes, or dual-model security review."""
