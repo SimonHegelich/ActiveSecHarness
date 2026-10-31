@@ -12,10 +12,10 @@
 | **Title** | Ring-0 Namespace Sandbox, Clean-Room Environment & Resource Quota Guard |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `A.1`, `A.2`, `E.1`, `E.2`, `E.3` |
-| **Source File** | [`src/activesec/guards/sandbox_guard.py`](../../src/activesec/guards/sandbox_guard.py) (`sha256:dc16771e6e20`) |
+| **Source File** | [`src/activesec/guards/sandbox_guard.py`](../../src/activesec/guards/sandbox_guard.py) (`sha256:3a282d50ee0b`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_sandbox_guard.py`](../../tests/security/test_sec_sandbox_guard.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
-| **Adversarial Security Verification** | **VERIFIED (PASS)** (3 test vectors) |
+| **Adversarial Security Verification** | **VERIFIED (PASS)** (4 test vectors) |
 
 ---
 
@@ -42,6 +42,7 @@ Isolates all agent subprocess executions using clean-room environment scrubbing,
 | `test_sec_clean_room_environment_strips_host_secrets` | [Vector A.2: Subprocess Environment Leak] Scrubs OPENAI_API_KEY, SSH_AUTH_SOCK, and DISPLAY from subprocesses. | **PASS** |
 | `test_sec_forbidden_docker_socket_and_ssh_mounts_blocked` | [Vector E.1: Container/Sandbox Escape] Blocks mounting /var/run/docker.sock, /etc/shadow, or ~/.ssh. | **PASS** |
 | `test_sec_unauthorized_lotl_binary_and_timeout_enforced` | [Vector A.1 & E.2: LotL Binary & Resource Exhaustion] Blocks unapproved binaries and terminates hung processes. | **PASS** |
+| `test_sec_gtfobins_disallowed_binary_flags_blocked` | [Vector E.3: Disallowed Binary Flags] Blocks GTFOBins flag escapes on allowlisted binaries. | **PASS** |
 
 ---
 

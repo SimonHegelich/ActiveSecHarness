@@ -12,10 +12,10 @@
 | **Title** | Ring-0 TLS 1.3 Transport & Anti-SSRF Network Guard |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `C.1`, `C.2`, `C.3` |
-| **Source File** | [`src/activesec/guards/network_guard.py`](../../src/activesec/guards/network_guard.py) (`sha256:12291c0db488`) |
+| **Source File** | [`src/activesec/guards/network_guard.py`](../../src/activesec/guards/network_guard.py) (`sha256:f8438b11eb30`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_network_guard.py`](../../tests/security/test_sec_network_guard.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
-| **Adversarial Security Verification** | **VERIFIED (PASS)** (4 test vectors) |
+| **Adversarial Security Verification** | **VERIFIED (PASS)** (5 test vectors) |
 
 ---
 
@@ -42,6 +42,7 @@ Enforces HTTPS with TLS 1.3, full certificate chain & hostname verification, dom
 | `test_sec_ssrf_and_dns_rebinding_ips_blocked` | [Vector C.2: SSRF & DNS Rebinding] Blocks domains resolving to loopback, metadata, or RFC1918 IPs. | **PASS** |
 | `test_sec_scoped_pentest_lab_cidr_permitted_only_within_scope` | [Vector C.2: Scoped Pentest Lab] Allows isolated lab subnet 10.99.42.0/24 while blocking other private IPs. | **PASS** |
 | `test_sec_hardened_tls_context_enforces_tls13` | [Vector C.1: TLS Hardening] Ensures SSLContext requires TLS 1.3 and strict certificate verification. | **PASS** |
+| `test_sec_socket_level_ip_pinning_defeats_post_check_dns_rebinding` | [Vector C.3: DNS Rebinding TOCTOU Defense] PinnedHTTPSConnection dials the pre-validated IP while preserving TLS SNI hostname. | **PASS** |
 
 ---
 

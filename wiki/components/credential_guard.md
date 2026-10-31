@@ -12,7 +12,7 @@
 | **Title** | Ring-0 Password Entropy, Dictionary Defense & Secret DLP Guard |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `D.1`, `D.2`, `D.3` |
-| **Source File** | [`src/activesec/guards/credential_guard.py`](../../src/activesec/guards/credential_guard.py) (`sha256:7214e8f0d0a5`) |
+| **Source File** | [`src/activesec/guards/credential_guard.py`](../../src/activesec/guards/credential_guard.py) (`sha256:d5d351b0fb6f`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_credential_guard.py`](../../tests/security/test_sec_credential_guard.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
 | **Adversarial Security Verification** | **VERIFIED (PASS)** (3 test vectors) |

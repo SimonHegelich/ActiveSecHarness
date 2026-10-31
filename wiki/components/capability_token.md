@@ -12,10 +12,10 @@
 | **Title** | Ring-0 Sudo Capability Token, 5-Level IFC Lattice & Attenuation Engine |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `A.1`, `A.3`, `F.2`, `F.3` |
-| **Source File** | [`src/activesec/core/capability_token.py`](../../src/activesec/core/capability_token.py) (`sha256:39fc1268d392`) |
+| **Source File** | [`src/activesec/core/capability_token.py`](../../src/activesec/core/capability_token.py) (`sha256:2534b54386ed`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_capability_token.py`](../../tests/security/test_sec_capability_token.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
-| **Adversarial Security Verification** | **VERIFIED (PASS)** (6 test vectors) |
+| **Adversarial Security Verification** | **VERIFIED (PASS)** (7 test vectors) |
 
 ---
 
@@ -45,6 +45,7 @@ Enforces cryptographic sudo capability chains with Macaroon-style chained HMAC-S
 | `test_sec_denied_paths_and_traversal_blocked` | [Vector A.4: Persistence Injection] Blocks writes to .git/hooks, .env, and ../ traversal. | **PASS** |
 | `test_sec_revocation_and_quota_enforcement` | [Vector A.1: LotL Misuse] Enforces call quotas and immediate parent-chain revocation. | **PASS** |
 | `test_sec_five_level_ifc_lattice_and_derived_test_usability` | [Vector F.2: 5-Level Information-Flow Taint Lattice] DERIVED taint permits workspace read/write and isolated pytest/unittest while blocking arbitrary shell and network egress. | **PASS** |
+| `test_sec_full_lineage_revocation_cascades_across_root_and_siblings` | [Vector A.1 & F.2: Lineage Revocation] Revoking any child token revokes root, sibling, and descendant tokens across the lineage. | **PASS** |
 
 ---
 
