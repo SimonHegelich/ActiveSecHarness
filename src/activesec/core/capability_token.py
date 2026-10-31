@@ -7,17 +7,162 @@ TTL, call quotas, and prompt-injection taint locking.
 
 from __future__ import annotations
 
+import enum
 import hashlib
 import hmac
 import json
 import os
 import secrets
+import shlex
 import time
 from dataclasses import dataclass
-from typing import FrozenSet, Optional, Tuple
+from typing import FrozenSet, Mapping, Optional, Sequence, Set, Tuple
 
 from activesec.core.component import ComponentSecurityAssessment, SecureComponent
 from activesec.core.exceptions import CapabilityViolationError
+
+
+class InformationClass(str, enum.Enum):
+    """5-Level Information-Flow Taint & Sensitivity Lattice.
+
+    Integrity/Taint ordering:
+        TRUSTED (0) <= SANITIZED (1) <= DERIVED (2) <= UNTRUSTED (3)
+    Sensitivity orthogonal/top absorption:
+        SENSITIVE (4) absorbs sensitivity when joined with any flow, or
+        blocks unredacted network egress and arbitrary shell execution unless
+        explicitly declassified to SANITIZED.
+    """
+
+    TRUSTED = "TRUSTED"
+    SANITIZED = "SANITIZED"
+    DERIVED = "DERIVED"
+    UNTRUSTED = "UNTRUSTED"
+    SENSITIVE = "SENSITIVE"
+
+    @property
+    def lattice_rank(self) -> int:
+        return _LATTICE_RANKS[self]
+
+    def join(self, other: "InformationClass") -> "InformationClass":
+        """Compute the least upper bound (join \\sqcup) in the 5-level lattice."""
+        if self == InformationClass.SENSITIVE or other == InformationClass.SENSITIVE:
+            return InformationClass.SENSITIVE
+        return self if self.lattice_rank >= other.lattice_rank else other
+
+
+_LATTICE_RANKS: Mapping[InformationClass, int] = {
+    InformationClass.TRUSTED: 0,
+    InformationClass.SANITIZED: 1,
+    InformationClass.DERIVED: 2,
+    InformationClass.UNTRUSTED: 3,
+    InformationClass.SENSITIVE: 4,
+}
+
+
+class ActionClass(str, enum.Enum):
+    """Fine-grained mediation action classes governed by the 5-level taint lattice."""
+
+    FS_READ_WORKSPACE = "FS_READ_WORKSPACE"
+    FS_WRITE_WORKSPACE = "FS_WRITE_WORKSPACE"
+    ARCHIVE_EXTRACT = "ARCHIVE_EXTRACT"
+    SHELL_TEST_ISOLATED = "SHELL_TEST_ISOLATED"
+    SHELL_ARBITRARY = "SHELL_ARBITRARY"
+    NETWORK_EGRESS = "NETWORK_EGRESS"
+
+
+# Explicit action-class permissions per InformationClass level:
+# - TRUSTED / SANITIZED: All workspace, test, shell, and allowlisted network actions permitted.
+# - DERIVED (e.g., internal plan/summary derived after reading an untrusted GitHub issue):
+#   Permits workspace fs:read, fs:write, archive:extract, and isolated test runs
+#   (pytest / python -m unittest inside SandboxGuard with network disabled), while
+#   blocking arbitrary shell execution (SHELL_ARBITRARY) and network egress (NETWORK_EGRESS).
+# - UNTRUSTED: Permits only local read/inspection (FS_READ_WORKSPACE); blocks workspace writes,
+#   all shell execution, and network egress.
+# - SENSITIVE: Permits only local read/write inside workspace; blocks all shell execution
+#   and network egress unless explicitly declassified to SANITIZED.
+ALLOWED_ACTIONS_BY_INFO_CLASS: Mapping[InformationClass, FrozenSet[ActionClass]] = {
+    InformationClass.TRUSTED: frozenset(ActionClass),
+    InformationClass.SANITIZED: frozenset(ActionClass),
+    InformationClass.DERIVED: frozenset(
+        {
+            ActionClass.FS_READ_WORKSPACE,
+            ActionClass.FS_WRITE_WORKSPACE,
+            ActionClass.ARCHIVE_EXTRACT,
+            ActionClass.SHELL_TEST_ISOLATED,
+        }
+    ),
+    InformationClass.UNTRUSTED: frozenset(
+        {
+            ActionClass.FS_READ_WORKSPACE,
+        }
+    ),
+    InformationClass.SENSITIVE: frozenset(
+        {
+            ActionClass.FS_READ_WORKSPACE,
+            ActionClass.FS_WRITE_WORKSPACE,
+        }
+    ),
+}
+
+ISOLATED_TEST_BINARIES: FrozenSet[str] = frozenset({"pytest", "python", "python3"})
+
+
+def classify_tool_action(
+    tool_name: str,
+    *,
+    binary_name: Optional[str] = None,
+    raw_command: Optional[str] = None,
+) -> ActionClass:
+    """Classify a tool call into a fine-grained ActionClass for IFC taint enforcement."""
+    if tool_name == "fs:read":
+        return ActionClass.FS_READ_WORKSPACE
+    if tool_name == "fs:write":
+        return ActionClass.FS_WRITE_WORKSPACE
+    if tool_name == "archive:extract":
+        return ActionClass.ARCHIVE_EXTRACT
+    if tool_name == "net:https":
+        return ActionClass.NETWORK_EGRESS
+    if tool_name == "shell:exec":
+        if is_isolated_test_command(binary_name=binary_name, raw_command=raw_command):
+            return ActionClass.SHELL_TEST_ISOLATED
+        return ActionClass.SHELL_ARBITRARY
+    return ActionClass.SHELL_ARBITRARY
+
+
+def is_isolated_test_command(
+    *,
+    binary_name: Optional[str] = None,
+    raw_command: Optional[str] = None,
+) -> bool:
+    """Return True if a shell command is strictly an isolated unit-test invocation (pytest / unittest)."""
+    if not raw_command:
+        return binary_name == "pytest"
+    # Reject shell metacharacters, pipes, chaining, or command substitution
+    if any(sep in raw_command for sep in (";", "|", "&", "`", "$(", ">", "<", "\n")):
+        return False
+    try:
+        argv = shlex.split(raw_command)
+    except ValueError:
+        return False
+    if not argv:
+        return False
+    exe = os.path.basename(argv[0])
+    if binary_name and os.path.basename(binary_name) != exe:
+        return False
+
+    # Case 1: direct pytest invocation without dangerous plugin/exec flags
+    if exe == "pytest":
+        forbidden_pytest_flags = {"-o", "--override-ini", "--rootdir", "--confcutdir"}
+        return not any(arg in forbidden_pytest_flags or arg.startswith("-o") for arg in argv[1:])
+
+    # Case 2: python / python3 -m pytest ... or python3 -m unittest ...
+    if exe in ("python", "python3") and len(argv) >= 3 and argv[1] == "-m":
+        runner = argv[2]
+        if runner in ("pytest", "unittest"):
+            forbidden_flags = {"-c", "-o", "--override-ini"}
+            return not any(arg in forbidden_flags for arg in argv[3:])
+
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +184,7 @@ class CapabilityCaveat:
     max_calls: int = 10
     expires_at_unix: float = 0.0
     require_untainted_context: bool = True
+    max_information_class: InformationClass = InformationClass.DERIVED
 
     def canonical_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-serializable dictionary for cryptographic signing."""
@@ -48,6 +194,7 @@ class CapabilityCaveat:
             "denied_paths": list(self.denied_paths),
             "expires_at_unix": round(self.expires_at_unix, 6),
             "max_calls": self.max_calls,
+            "max_information_class": self.max_information_class.value,
             "network_destinations": sorted(self.network_destinations),
             "path_prefixes": [os.path.realpath(p) for p in self.path_prefixes],
             "require_untainted_context": self.require_untainted_context,
@@ -80,6 +227,8 @@ class CapabilityEngine(SecureComponent):
             )
         self._call_counts: dict[str, int] = {}
         self._revoked_tokens: set[str] = set()
+        self._consumed_nonces: set[str] = set()
+        self._issued_tokens: dict[str, CapabilityToken] = {}
 
     def get_call_count(self, token_id: str) -> int:
         """Return the number of verified tool invocations recorded for ``token_id``."""
@@ -93,7 +242,7 @@ class CapabilityEngine(SecureComponent):
     def security_assessment(cls) -> ComponentSecurityAssessment:
         return ComponentSecurityAssessment(
             component_id="capability_token",
-            title="Ring-0 Sudo Capability Token & Attenuation Engine",
+            title="Ring-0 Sudo Capability Token, 5-Level IFC Lattice & Attenuation Engine",
             ring_level=0,
             source_path="src/activesec/core/capability_token.py",
             security_test_path="tests/security/test_sec_capability_token.py",
@@ -101,13 +250,16 @@ class CapabilityEngine(SecureComponent):
             summary=(
                 "Enforces cryptographic sudo capability chains with Macaroon-style chained HMAC-SHA256 "
                 "signatures, monotonic attenuation on sub-agent delegation, canonical path confinement, "
-                "call-quota tracking, and automatic privilege locking upon prompt-injection context taint."
+                "atomic call-quota/nonce tracking, parent-chain binding, and a 5-level Information-Flow "
+                "Taint Lattice (TRUSTED, SANITIZED, DERIVED, UNTRUSTED, SENSITIVE) with fine-grained "
+                "action-class permissions."
             ),
             enforced_invariants=(
                 "All tokens are signed with a >=256-bit Ring-0 secret using constant-time hmac.compare_digest.",
-                "Delegation strictly narrows authority: Child tools, binaries, network targets, paths, TTL, and quotas must be a mathematical subset of the parent token.",
+                "Delegation strictly narrows authority: Child tools, binaries, network targets, paths, TTL, quotas, and max_information_class must be a mathematical subset of the parent token.",
                 "Canonical path resolution (os.path.realpath) prevents ../ traversal and protects Ring-0 harness source and dotfiles.",
-                "Tainted agents (context_tainted=True) are deterministically blocked when require_untainted_context is active.",
+                "Enforces the 5-level InformationClass lattice: DERIVED taint permits workspace read/write and isolated pytest/unittest runs while blocking arbitrary shell escapes and network egress; UNTRUSTED and SENSITIVE contexts block privileged execution and exfiltration.",
+                "Tracks per-call nonces and transitive parent-chain quotas atomically to defeat replay and sub-token quota amplification.",
             ),
             residual_risks=(
                 "In-process memory disclosure if untrusted native C extensions run inside the Ring-0 Python interpreter process (mitigated by running tools in isolated bwrap subprocesses).",
@@ -172,7 +324,7 @@ class CapabilityEngine(SecureComponent):
             caveats=caveats,
         )
         self._call_counts[token_id] = 0
-        return CapabilityToken(
+        tok = CapabilityToken(
             token_id=token_id,
             parent_token_id=None,
             issuer_ring=1,
@@ -181,6 +333,8 @@ class CapabilityEngine(SecureComponent):
             caveats=caveats,
             signature=signature,
         )
+        self._issued_tokens[token_id] = tok
+        return tok
 
     def delegate_attenuated_token(
         self,
@@ -240,22 +394,31 @@ class CapabilityEngine(SecureComponent):
                 component_id="capability_token",
             )
 
-        # 6. Verify TTL and call quota narrowing
+        # 6. Verify TTL, call quota, and InformationClass lattice narrowing
         if narrowed_caveat.expires_at_unix > effective_parent.expires_at_unix:
             raise CapabilityViolationError(
                 "Attenuation violation: child token TTL exceeds parent token expiration.",
                 vector_id="F.3",
                 component_id="capability_token",
             )
-        if narrowed_caveat.max_calls > effective_parent.max_calls:
+        parent_used = self._call_counts.get(parent_token.token_id, 0)
+        parent_remaining = max(0, effective_parent.max_calls - parent_used)
+        if narrowed_caveat.max_calls > effective_parent.max_calls or narrowed_caveat.max_calls > parent_remaining:
             raise CapabilityViolationError(
-                "Attenuation violation: child token max_calls exceeds parent quota.",
+                "Attenuation violation: child token max_calls exceeds parent remaining quota.",
                 vector_id="F.3",
                 component_id="capability_token",
             )
         if effective_parent.require_untainted_context and not narrowed_caveat.require_untainted_context:
             raise CapabilityViolationError(
                 "Attenuation violation: child token cannot disable require_untainted_context.",
+                vector_id="F.2",
+                component_id="capability_token",
+            )
+        if narrowed_caveat.max_information_class.lattice_rank > effective_parent.max_information_class.lattice_rank:
+            raise CapabilityViolationError(
+                f"Attenuation violation: child max_information_class '{narrowed_caveat.max_information_class.value}' "
+                f"exceeds parent '{effective_parent.max_information_class.value}'.",
                 vector_id="F.2",
                 component_id="capability_token",
             )
@@ -271,7 +434,7 @@ class CapabilityEngine(SecureComponent):
             caveats=combined_caveats,
         )
         self._call_counts[child_id] = 0
-        return CapabilityToken(
+        child_tok = CapabilityToken(
             token_id=child_id,
             parent_token_id=parent_token.token_id,
             issuer_ring=min(3, parent_token.issuer_ring + 1),
@@ -280,6 +443,8 @@ class CapabilityEngine(SecureComponent):
             caveats=combined_caveats,
             signature=signature,
         )
+        self._issued_tokens[child_id] = child_tok
+        return child_tok
 
     def revoke_token(self, token_id: str) -> None:
         """Immediately revoke a token ID (and any chain referencing it as parent)."""
@@ -300,6 +465,22 @@ class CapabilityEngine(SecureComponent):
                 vector_id="A.1",
                 component_id="capability_token",
             )
+        # Walk transitive ancestor chain if registered in engine
+        curr_parent_id = token.parent_token_id
+        visited: set[str] = {token.token_id}
+        while curr_parent_id is not None:
+            if curr_parent_id in self._revoked_tokens:
+                raise CapabilityViolationError(
+                    f"Ancestor token '{curr_parent_id}' in chain of '{token.token_id}' has been revoked.",
+                    vector_id="A.1",
+                    component_id="capability_token",
+                )
+            if curr_parent_id in visited:
+                break
+            visited.add(curr_parent_id)
+            parent_obj = self._issued_tokens.get(curr_parent_id)
+            curr_parent_id = parent_obj.parent_token_id if parent_obj is not None else None
+
         expected_sig = self._compute_chain_signature(
             token_id=token.token_id,
             parent_token_id=token.parent_token_id,
@@ -323,11 +504,14 @@ class CapabilityEngine(SecureComponent):
         tool_name: str,
         target_path: Optional[str] = None,
         binary_name: Optional[str] = None,
+        raw_command: Optional[str] = None,
         network_destination: Optional[str] = None,
         context_tainted: bool = False,
+        information_class: Optional[InformationClass] = None,
+        call_nonce: Optional[str] = None,
         current_time: Optional[float] = None,
     ) -> None:
-        """Verify every caveat in the token chain for a concrete tool invocation."""
+        """Verify every caveat in the token chain and 5-level IFC lattice for a concrete tool invocation."""
         self._verify_signature_and_revocation(token)
 
         if token.subject_agent_id != agent_id:
@@ -336,6 +520,34 @@ class CapabilityEngine(SecureComponent):
                 vector_id="F.3",
                 component_id="capability_token",
             )
+
+        if call_nonce is not None:
+            nonce_key = f"{token.token_id}:{call_nonce}"
+            if nonce_key in self._consumed_nonces:
+                raise CapabilityViolationError(
+                    f"Replay attack detected: call_nonce '{call_nonce}' has already been consumed.",
+                    vector_id="A.3",
+                    component_id="capability_token",
+                )
+
+        # Resolve effective 5-level InformationClass (maintaining backward compatibility with context_tainted: bool)
+        if information_class is not None:
+            effective_info_class = (
+                information_class.join(InformationClass.UNTRUSTED)
+                if context_tainted
+                else information_class
+            )
+        else:
+            effective_info_class = (
+                InformationClass.UNTRUSTED if context_tainted else InformationClass.TRUSTED
+            )
+
+        action_class = classify_tool_action(
+            tool_name,
+            binary_name=binary_name,
+            raw_command=raw_command,
+        )
+        allowed_actions = ALLOWED_ACTIONS_BY_INFO_CLASS[effective_info_class]
 
         now = current_time if current_time is not None else time.time()
         used_calls = self._call_counts.get(token.token_id, 0)
@@ -353,12 +565,21 @@ class CapabilityEngine(SecureComponent):
                     vector_id="A.1",
                     component_id="capability_token",
                 )
-            if context_tainted and caveat.require_untainted_context:
-                raise CapabilityViolationError(
-                    "Agent context is TAINTED by untrusted input; privileged tool call blocked.",
-                    vector_id="F.2",
-                    component_id="capability_token",
-                )
+            if caveat.require_untainted_context:
+                if effective_info_class.lattice_rank > caveat.max_information_class.lattice_rank:
+                    raise CapabilityViolationError(
+                        f"Agent context taint level '{effective_info_class.value}' exceeds caveat "
+                        f"max_information_class '{caveat.max_information_class.value}'; tool call blocked.",
+                        vector_id="F.2",
+                        component_id="capability_token",
+                    )
+                if action_class not in allowed_actions:
+                    raise CapabilityViolationError(
+                        f"Information-Flow Control violation: action '{action_class.value}' ({tool_name}) "
+                        f"is forbidden under taint level '{effective_info_class.value}'.",
+                        vector_id="F.2",
+                        component_id="capability_token",
+                    )
             if tool_name not in caveat.allowed_tools:
                 raise CapabilityViolationError(
                     f"Tool '{tool_name}' is not permitted by capability token.",
@@ -402,4 +623,27 @@ class CapabilityEngine(SecureComponent):
                             component_id="capability_token",
                         )
 
+        # Also check transitive parent call quotas if parent is tracked
+        curr_parent_id = token.parent_token_id
+        visited_ancestors: list[str] = []
+        while curr_parent_id is not None and curr_parent_id not in visited_ancestors:
+            parent_obj = self._issued_tokens.get(curr_parent_id)
+            if parent_obj is not None:
+                parent_used = self._call_counts.get(curr_parent_id, 0)
+                parent_max = parent_obj.caveats[-1].max_calls
+                if parent_used >= parent_max:
+                    raise CapabilityViolationError(
+                        f"Ancestor token '{curr_parent_id}' call quota exhausted ({parent_used}/{parent_max}).",
+                        vector_id="A.1",
+                        component_id="capability_token",
+                    )
+                visited_ancestors.append(curr_parent_id)
+                curr_parent_id = parent_obj.parent_token_id
+            else:
+                break
+
+        if call_nonce is not None:
+            self._consumed_nonces.add(f"{token.token_id}:{call_nonce}")
         self._call_counts[token.token_id] = used_calls + 1
+        for anc_id in visited_ancestors:
+            self._call_counts[anc_id] = self._call_counts.get(anc_id, 0) + 1

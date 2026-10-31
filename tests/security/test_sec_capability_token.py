@@ -12,7 +12,13 @@ from dataclasses import replace
 
 import pytest
 
-from activesec.core.capability_token import CapabilityCaveat, CapabilityEngine
+from activesec.core.capability_token import (
+    ActionClass,
+    CapabilityCaveat,
+    CapabilityEngine,
+    InformationClass,
+    classify_tool_action,
+)
 from activesec.core.exceptions import CapabilityViolationError
 
 
@@ -193,3 +199,105 @@ def test_sec_revocation_and_quota_enforcement(tmp_path: os.PathLike[str]) -> Non
     # Second call exceeds max_calls=1
     with pytest.raises(CapabilityViolationError):
         engine.verify_tool_call(token=token, agent_id="reader", tool_name="fs:read")
+
+
+@pytest.mark.security
+def test_sec_five_level_ifc_lattice_and_derived_test_usability(tmp_path: os.PathLike[str]) -> None:
+    """[Vector F.2: 5-Level Information-Flow Taint Lattice] DERIVED taint permits workspace read/write and isolated pytest/unittest while blocking arbitrary shell and network egress."""
+    engine = CapabilityEngine()
+    ws = str(tmp_path)
+    caveat = CapabilityCaveat(
+        allowed_tools=frozenset({"fs:read", "fs:write", "shell:exec", "net:https"}),
+        path_prefixes=(ws,),
+        allowed_binaries=frozenset({"pytest", "python3", "bash", "curl"}),
+        network_destinations=frozenset({"pypi.org"}),
+        max_calls=10,
+        expires_at_unix=time.time() + 300,
+        max_information_class=InformationClass.DERIVED,
+    )
+    token = engine.issue_root_token(
+        subject_agent_id="swe-agent",
+        task_purpose="Read issue, edit workspace, run isolated tests",
+        caveat=caveat,
+    )
+
+    # 1. Verify lattice join algebraic ordering
+    assert InformationClass.TRUSTED.join(InformationClass.DERIVED) == InformationClass.DERIVED
+    assert InformationClass.DERIVED.join(InformationClass.UNTRUSTED) == InformationClass.UNTRUSTED
+    assert InformationClass.DERIVED.join(InformationClass.SENSITIVE) == InformationClass.SENSITIVE
+    assert classify_tool_action("shell:exec", binary_name="pytest", raw_command="pytest -q tests/") == ActionClass.SHELL_TEST_ISOLATED
+    assert classify_tool_action("shell:exec", binary_name="python3", raw_command="python3 -m unittest discover") == ActionClass.SHELL_TEST_ISOLATED
+    assert classify_tool_action("shell:exec", binary_name="python3", raw_command="python3 -c 'import os'") == ActionClass.SHELL_ARBITRARY
+
+    # 2. Under DERIVED taint, fs:read, fs:write, and isolated pytest/unittest succeed
+    engine.verify_tool_call(
+        token=token,
+        agent_id="swe-agent",
+        tool_name="fs:read",
+        target_path=os.path.join(ws, "bug.py"),
+        information_class=InformationClass.DERIVED,
+        call_nonce="nonce-1",
+    )
+    engine.verify_tool_call(
+        token=token,
+        agent_id="swe-agent",
+        tool_name="fs:write",
+        target_path=os.path.join(ws, "bug.py"),
+        information_class=InformationClass.DERIVED,
+        call_nonce="nonce-2",
+    )
+    engine.verify_tool_call(
+        token=token,
+        agent_id="swe-agent",
+        tool_name="shell:exec",
+        binary_name="pytest",
+        raw_command="pytest -q tests/test_bug.py",
+        information_class=InformationClass.DERIVED,
+        call_nonce="nonce-3",
+    )
+
+    # 3. Replay of consumed call_nonce is rejected
+    with pytest.raises(CapabilityViolationError) as exc_replay:
+        engine.verify_tool_call(
+            token=token,
+            agent_id="swe-agent",
+            tool_name="fs:read",
+            target_path=os.path.join(ws, "bug.py"),
+            information_class=InformationClass.DERIVED,
+            call_nonce="nonce-1",
+        )
+    assert exc_replay.value.vector_id == "A.3"
+
+    # 4. Under DERIVED taint, arbitrary shell commands (e.g., bash or python3 -c) and net:https are blocked
+    with pytest.raises(CapabilityViolationError) as exc_shell:
+        engine.verify_tool_call(
+            token=token,
+            agent_id="swe-agent",
+            tool_name="shell:exec",
+            binary_name="python3",
+            raw_command="python3 -c 'import socket'",
+            information_class=InformationClass.DERIVED,
+        )
+    assert exc_shell.value.vector_id == "F.2"
+
+    with pytest.raises(CapabilityViolationError) as exc_net:
+        engine.verify_tool_call(
+            token=token,
+            agent_id="swe-agent",
+            tool_name="net:https",
+            network_destination="pypi.org",
+            information_class=InformationClass.DERIVED,
+        )
+    assert exc_net.value.vector_id == "F.2"
+
+    # 5. Under UNTRUSTED or SENSITIVE taint, calls exceeding max_information_class=DERIVED are blocked
+    with pytest.raises(CapabilityViolationError) as exc_untrusted:
+        engine.verify_tool_call(
+            token=token,
+            agent_id="swe-agent",
+            tool_name="fs:write",
+            target_path=os.path.join(ws, "bug.py"),
+            information_class=InformationClass.UNTRUSTED,
+        )
+    assert exc_untrusted.value.vector_id == "F.2"
+
