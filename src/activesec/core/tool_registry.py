@@ -69,7 +69,7 @@ AgentCombinationProbe = Callable[[str, FrozenSet[str]], bool]
 
 @dataclass(frozen=True, slots=True)
 class ToolCertificate:
-    """Ring-0 cryptographic certificate binding a tool's schema, side-effect class, and handler hash."""
+    """Ring-0 cryptographic certificate binding a tool's schema, side-effect class, handler hash, dependency digest, import-path lock, and env allowlist."""
 
     certificate_id: str
     tool_name: str
@@ -79,6 +79,9 @@ class ToolCertificate:
     probes_executed: int
     issued_at_unix: float
     signature: str
+    dependency_digest: str = "stdlib-only"
+    import_path_lock: Tuple[str, ...] = ()
+    env_allowlist: FrozenSet[str] = frozenset({"PATH", "LANG", "LC_ALL"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +94,9 @@ class CertifiedToolSpec:
     allowed_arg_keys: FrozenSet[str]
     required_arg_keys: FrozenSet[str] = frozenset()
     max_arg_value_chars: int = 16_384
+    dependency_digest: str = "stdlib-only"
+    import_path_lock: Tuple[str, ...] = ()
+    env_allowlist: FrozenSet[str] = frozenset({"PATH", "LANG", "LC_ALL"})
     handler: Optional[ToolHandlerFunc] = None
     certificate: Optional[ToolCertificate] = None
 
@@ -98,7 +104,10 @@ class CertifiedToolSpec:
         """Return deterministic dictionary representation of the tool schema."""
         return {
             "allowed_arg_keys": sorted(self.allowed_arg_keys),
+            "dependency_digest": self.dependency_digest.strip(),
             "description": self.description.strip(),
+            "env_allowlist": sorted(self.env_allowlist),
+            "import_path_lock": list(self.import_path_lock),
             "max_arg_value_chars": self.max_arg_value_chars,
             "required_arg_keys": sorted(self.required_arg_keys),
             "side_effect_class": self.side_effect_class.strip().upper(),
@@ -279,11 +288,17 @@ class CertifiedToolRegistry(SecureComponent):
         handler_sha256: str,
         probes_executed: int,
         issued_at_unix: float,
+        dependency_digest: str = "stdlib-only",
+        import_path_lock: Tuple[str, ...] = (),
+        env_allowlist: FrozenSet[str] = frozenset({"PATH", "LANG", "LC_ALL"}),
     ) -> str:
         payload = json.dumps(
             {
                 "certificate_id": certificate_id,
+                "dependency_digest": dependency_digest,
+                "env_allowlist": sorted(env_allowlist),
                 "handler_sha256": handler_sha256,
+                "import_path_lock": list(import_path_lock),
                 "issued_at_unix": round(issued_at_unix, 6),
                 "probes_executed": probes_executed,
                 "schema_sha256": schema_sha256,
@@ -384,6 +399,9 @@ class CertifiedToolRegistry(SecureComponent):
             handler_sha256=handler_hash,
             probes_executed=len(adversarial_probes),
             issued_at_unix=now,
+            dependency_digest=spec.dependency_digest,
+            import_path_lock=spec.import_path_lock,
+            env_allowlist=spec.env_allowlist,
         )
         cert = ToolCertificate(
             certificate_id=cert_id,
@@ -394,6 +412,9 @@ class CertifiedToolRegistry(SecureComponent):
             probes_executed=len(adversarial_probes),
             issued_at_unix=now,
             signature=sig,
+            dependency_digest=spec.dependency_digest,
+            import_path_lock=spec.import_path_lock,
+            env_allowlist=spec.env_allowlist,
         )
         certified_spec = CertifiedToolSpec(
             tool_name=tool_name,
@@ -402,6 +423,9 @@ class CertifiedToolRegistry(SecureComponent):
             allowed_arg_keys=spec.allowed_arg_keys,
             required_arg_keys=spec.required_arg_keys,
             max_arg_value_chars=spec.max_arg_value_chars,
+            dependency_digest=spec.dependency_digest,
+            import_path_lock=spec.import_path_lock,
+            env_allowlist=spec.env_allowlist,
             handler=spec.handler,
             certificate=cert,
         )
@@ -489,6 +513,32 @@ class CertifiedToolRegistry(SecureComponent):
                 component_id="tool_registry",
             )
 
+        if spec.dependency_digest != cert.dependency_digest:
+            raise ToolCertificationError(
+                f"Tool '{spec.tool_name}' dependency_digest mismatch ('{spec.dependency_digest}' != '{cert.dependency_digest}').",
+                vector_id="A.1",
+                component_id="tool_registry",
+            )
+        if spec.import_path_lock != cert.import_path_lock:
+            raise ToolCertificationError(
+                f"Tool '{spec.tool_name}' import_path_lock tampered after certification.",
+                vector_id="A.1",
+                component_id="tool_registry",
+            )
+        if spec.env_allowlist != cert.env_allowlist:
+            raise ToolCertificationError(
+                f"Tool '{spec.tool_name}' env_allowlist tampered after certification.",
+                vector_id="A.1",
+                component_id="tool_registry",
+            )
+        for forbidden_env in ("LD_PRELOAD", "PYTHONPATH", "PYTHONINSPECT", "BASH_ENV", "ENV"):
+            if forbidden_env in spec.env_allowlist:
+                raise ToolCertificationError(
+                    f"Tool '{spec.tool_name}' declares forbidden hijacking environment variable '{forbidden_env}' in env_allowlist.",
+                    vector_id="A.1",
+                    component_id="tool_registry",
+                )
+
         expected_sig = self._sign_tool_certificate(
             certificate_id=cert.certificate_id,
             tool_name=cert.tool_name,
@@ -497,6 +547,9 @@ class CertifiedToolRegistry(SecureComponent):
             handler_sha256=cert.handler_sha256,
             probes_executed=cert.probes_executed,
             issued_at_unix=cert.issued_at_unix,
+            dependency_digest=cert.dependency_digest,
+            import_path_lock=cert.import_path_lock,
+            env_allowlist=cert.env_allowlist,
         )
         if not hmac.compare_digest(expected_sig, cert.signature) or cert.tool_name != spec.tool_name:
             raise ToolCertificationError(
