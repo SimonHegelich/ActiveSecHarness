@@ -7,11 +7,12 @@ counters, compression ratio caps, canonical path confinement, and special-file r
 from __future__ import annotations
 
 import os
+import secrets
 import shutil
 import stat
 import zipfile
 from dataclasses import dataclass
-from typing import List
+from typing import List, Tuple
 
 from activesec.core.component import ComponentSecurityAssessment, SecureComponent
 from activesec.core.exceptions import ArchiveSecurityError
@@ -57,9 +58,9 @@ class ArchiveGuard(SecureComponent):
             ),
             enforced_invariants=(
                 "Never invokes zipfile.extractall() or tarfile.extractall().",
-                "Streams decompression in 64 KB chunks while counting actual uncompressed bytes against max_single_file_bytes, max_total_uncompressed_bytes, and max_compression_ratio.",
-                "Rejects symlinks, FIFOs, character/block devices, and setuid/setgid bits via Unix external attributes.",
-                "Resolves canonical target paths via os.path.realpath() and cleans up the target directory on any violation.",
+                "Streams decompression into an isolated atomic staging directory (.staging_<random>) using O_NOFOLLOW file descriptors while counting actual uncompressed bytes against max_single_file_bytes, max_total_uncompressed_bytes, and max_compression_ratio.",
+                "Rejects symlinks, FIFOs, character/block devices, and setuid/setgid bits via Unix external attributes and post-extraction lstat/realpath verification.",
+                "Verifies canonical path containment against TOCTOU symlink swaps before atomically moving verified files into target_dir.",
             ),
             residual_risks=(
                 "CPU time spent decompressing up to the configured quota before threshold termination (bounded by SandboxGuard wall-clock timeout).",
@@ -88,10 +89,21 @@ class ArchiveGuard(SecureComponent):
                 component_id="archive_guard",
             )
 
+        if os.path.islink(target_dir):
+            raise ArchiveSecurityError(
+                f"Extraction target_dir '{target_dir}' is a symbolic link (TOCTOU defense).",
+                vector_id="B.2",
+                component_id="archive_guard",
+            )
+
         real_target = os.path.realpath(target_dir)
         os.makedirs(real_target, mode=0o700, exist_ok=True)
+        staging_dir = os.path.join(real_target, f".staging_{secrets.token_hex(8)}")
+        os.makedirs(staging_dir, mode=0o700, exist_ok=True)
+
         archive_file_size = max(1, os.path.getsize(zip_path))
         total_written = 0
+        staged_pairs: List[Tuple[str, str]] = []
         extracted_files: List[str] = []
 
         try:
@@ -106,10 +118,12 @@ class ArchiveGuard(SecureComponent):
 
                 for info in infos:
                     self._validate_member_attributes(info)
-                    dest_path = self._resolve_safe_destination(real_target, info.filename)
+                    staged_path = self._resolve_safe_destination(staging_dir, info.filename)
+                    final_dest_path = self._resolve_safe_destination(real_target, info.filename)
 
                     if info.is_dir():
-                        os.makedirs(dest_path, mode=0o700, exist_ok=True)
+                        os.makedirs(staged_path, mode=0o700, exist_ok=True)
+                        os.makedirs(final_dest_path, mode=0o700, exist_ok=True)
                         continue
 
                     if any(info.filename.lower().endswith(ext) for ext in self.NESTED_ARCHIVE_EXTENSIONS):
@@ -120,11 +134,26 @@ class ArchiveGuard(SecureComponent):
                                 component_id="archive_guard",
                             )
 
-                    os.makedirs(os.path.dirname(dest_path), mode=0o700, exist_ok=True)
+                    os.makedirs(os.path.dirname(staged_path), mode=0o700, exist_ok=True)
                     file_written = 0
                     compressed_size = max(1, info.compress_size)
 
-                    with zf.open(info, "r") as src, open(dest_path, "wb") as dst:
+                    open_flags = (
+                        os.O_WRONLY
+                        | os.O_CREAT
+                        | os.O_TRUNC
+                        | getattr(os, "O_NOFOLLOW", 0)
+                    )
+                    try:
+                        fd = os.open(staged_path, open_flags, 0o600)
+                    except OSError as exc:
+                        raise ArchiveSecurityError(
+                            f"Failed to open staging descriptor with O_NOFOLLOW for '{info.filename}': {exc}",
+                            vector_id="B.2",
+                            component_id="archive_guard",
+                        ) from exc
+
+                    with zf.open(info, "r") as src, os.fdopen(fd, "wb") as dst:
                         while True:
                             chunk = src.read(self._policy.chunk_size)
                             if not chunk:
@@ -165,21 +194,67 @@ class ArchiveGuard(SecureComponent):
 
                             dst.write(chunk)
 
-                    os.chmod(dest_path, 0o600)
-                    extracted_files.append(dest_path)
+                    self._verify_no_symlink_or_escape(staged_path, staging_dir)
+                    os.chmod(staged_path, 0o600)
+                    staged_pairs.append((staged_path, final_dest_path))
+
+                # Atomic promotion from staging_dir to real_target after all members pass quotas & realpath checks
+                for staged_path, final_dest_path in staged_pairs:
+                    self._verify_no_symlink_or_escape(staged_path, staging_dir)
+                    dest_parent = os.path.dirname(final_dest_path)
+                    os.makedirs(dest_parent, mode=0o700, exist_ok=True)
+                    if os.path.islink(dest_parent) or os.path.islink(final_dest_path):
+                        raise ArchiveSecurityError(
+                            f"TOCTOU symlink race detected at destination '{final_dest_path}'.",
+                            vector_id="B.2",
+                            component_id="archive_guard",
+                        )
+                    os.replace(staged_path, final_dest_path)
+                    self._verify_no_symlink_or_escape(final_dest_path, real_target)
+                    os.chmod(final_dest_path, 0o600)
+                    extracted_files.append(final_dest_path)
 
         except ArchiveSecurityError:
+            shutil.rmtree(staging_dir, ignore_errors=True)
             self._purge_directory_contents(real_target)
             raise
         except zipfile.BadZipFile as exc:
+            shutil.rmtree(staging_dir, ignore_errors=True)
             self._purge_directory_contents(real_target)
             raise ArchiveSecurityError(
                 f"Corrupted or malformed ZIP archive: {exc}",
                 vector_id="B.1",
                 component_id="archive_guard",
             ) from exc
+        finally:
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
         return extracted_files
+
+    @staticmethod
+    def _verify_no_symlink_or_escape(file_path: str, root_dir: str) -> None:
+        """Verify via lstat and realpath that `file_path` is a regular file strictly inside `root_dir`."""
+        if os.path.islink(file_path):
+            raise ArchiveSecurityError(
+                f"Post-extraction symlink race detected on '{file_path}'.",
+                vector_id="B.2",
+                component_id="archive_guard",
+            )
+        st = os.lstat(file_path)
+        if not stat.S_ISREG(st.st_mode):
+            raise ArchiveSecurityError(
+                f"Extracted entry '{file_path}' is not a regular file.",
+                vector_id="B.2",
+                component_id="archive_guard",
+            )
+        real_file = os.path.realpath(file_path)
+        real_root = os.path.realpath(root_dir)
+        if not (real_file == real_root or real_file.startswith(real_root + os.sep)):
+            raise ArchiveSecurityError(
+                f"Post-extraction canonical path '{real_file}' escaped root '{real_root}'.",
+                vector_id="B.2",
+                component_id="archive_guard",
+            )
 
     @staticmethod
     def _validate_member_attributes(info: zipfile.ZipInfo) -> None:

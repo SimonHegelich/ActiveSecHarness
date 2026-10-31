@@ -91,3 +91,28 @@ def test_sec_recursive_nested_archive_limit_enforced(tmp_path: os.PathLike[str])
         guard.safe_extract_zip(nested_zip, extract_dir, current_depth=0)
 
     assert exc_info.value.vector_id == "B.1"
+
+
+@pytest.mark.security
+def test_sec_archive_atomic_staging_and_symlink_target_rejection(tmp_path: os.PathLike[str]) -> None:
+    """[Vector B.2: TOCTOU Symlink Target Rejection & Atomic Staging] Rejects symlinked target_dir and leaves zero leftover staging directories after extraction."""
+    valid_zip = os.path.join(str(tmp_path), "valid.zip")
+    with zipfile.ZipFile(valid_zip, "w") as zf:
+        zf.writestr("sub/hello.txt", "atomic_safe_payload")
+
+    real_dir = os.path.join(str(tmp_path), "real_dest")
+    os.makedirs(real_dir, exist_ok=True)
+    symlink_dir = os.path.join(str(tmp_path), "symlink_dest")
+    os.symlink(real_dir, symlink_dir)
+
+    guard = ArchiveGuard()
+    # 1. Symlinked target_dir must be rejected immediately
+    with pytest.raises(ArchiveSecurityError) as exc_link:
+        guard.safe_extract_zip(valid_zip, symlink_dir)
+    assert exc_link.value.vector_id == "B.2"
+
+    # 2. Valid extraction uses atomic staging and cleans up .staging_* directory
+    extracted = guard.safe_extract_zip(valid_zip, real_dir)
+    assert len(extracted) == 1
+    assert not any(name.startswith(".staging_") for name in os.listdir(real_dir))
+
