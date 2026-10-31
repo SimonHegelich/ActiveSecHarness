@@ -22,9 +22,13 @@ from pathlib import Path
 import pytest
 
 from activesec.core.capability_token import (
+    ActionClass,
     CapabilityCaveat,
     CapabilityEngine,
+    CompositeLabel,
     InformationClass,
+    SensitivityLevel,
+    TrustLevel,
 )
 from activesec.core.exceptions import CapabilityViolationError, ToxicCombinationError
 from activesec.core.security_kernel import SecurityKernel
@@ -249,3 +253,49 @@ def test_sec_derived_taint_and_explicit_declassification_preserve_swe_workflows(
         ledger.verify_compositional_action(agent_id="release-agent", tool_name="net:https")
         == InformationClass.SANITIZED
     )
+
+
+@pytest.mark.security
+def test_sec_product_lattice_sanitization_preserves_sensitivity_while_redaction_clears_it(tmp_path: Path) -> None:
+    """[Vector D.2 & F.2: 2D Product Lattice L_trust x L_sens] Structural sanitization lowers tau to SANITIZED without clearing sigma=SENSITIVE; (UNTRUSTED, SENSITIVE) blocks writes."""
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+
+    # 1. Verify product-lattice join and coordinate separation
+    untrusted_pub = CompositeLabel(TrustLevel.UNTRUSTED, SensitivityLevel.PUBLIC)
+    trusted_sens = CompositeLabel(TrustLevel.TRUSTED, SensitivityLevel.SENSITIVE)
+    both = untrusted_pub.join(trusted_sens)
+    assert both == CompositeLabel(TrustLevel.UNTRUSTED, SensitivityLevel.SENSITIVE)
+
+    # (UNTRUSTED, SENSITIVE) must forbid FS_WRITE_WORKSPACE (since tau=UNTRUSTED forbids writes)
+    assert ActionClass.FS_WRITE_WORKSPACE not in both.allowed_actions
+    assert ActionClass.FS_READ_WORKSPACE in both.allowed_actions
+
+    # 2. Structural sanitization maps (UNTRUSTED, SENSITIVE) -> (SANITIZED, SENSITIVE) without clearing sigma
+    sanitized_still_secret = both.sanitize()
+    assert sanitized_still_secret == CompositeLabel(TrustLevel.SANITIZED, SensitivityLevel.SENSITIVE)
+    assert ActionClass.NETWORK_EGRESS not in sanitized_still_secret.allowed_actions
+
+    # 3. Redaction / declassification clears sigma -> PUBLIC
+    declassified = sanitized_still_secret.redact_or_declassify()
+    assert declassified == CompositeLabel(TrustLevel.SANITIZED, SensitivityLevel.PUBLIC)
+    assert ActionClass.NETWORK_EGRESS in declassified.allowed_actions
+
+    # 4. Verify in WorkspaceProvenanceLedger that sanitize_agent_representation does not declassify secrets
+    ledger = WorkspaceProvenanceLedger(workspace_dir=str(ws))
+    ledger.elevate_agent_taint(
+        "agent-x",
+        InformationClass.SENSITIVE,
+        side_effects=frozenset({"READ_SENSITIVE", "READ_EXTERNAL"}),
+        composite_label=both,
+    )
+    # Before sanitization, even fs:write is blocked because tau=UNTRUSTED
+    with pytest.raises(CapabilityViolationError):
+        ledger.verify_compositional_action(agent_id="agent-x", tool_name="fs:write", target_path=str(ws / "out.txt"))
+
+    # After structural sanitization, tau becomes SANITIZED (so local write is allowed), but sigma remains SENSITIVE (so net:https is still blocked!)
+    ledger.sanitize_agent_representation("agent-x")
+    assert ledger.get_agent_state("agent-x").composite_label == CompositeLabel(TrustLevel.SANITIZED, SensitivityLevel.SENSITIVE)
+    with pytest.raises(ToxicCombinationError):
+        ledger.verify_compositional_action(agent_id="agent-x", tool_name="net:https")
+

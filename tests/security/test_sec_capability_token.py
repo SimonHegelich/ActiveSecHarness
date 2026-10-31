@@ -16,7 +16,10 @@ from activesec.core.capability_token import (
     ActionClass,
     CapabilityCaveat,
     CapabilityEngine,
+    CompositeLabel,
     InformationClass,
+    SensitivityLevel,
+    TrustLevel,
     classify_tool_action,
 )
 from activesec.core.exceptions import CapabilityViolationError
@@ -300,4 +303,44 @@ def test_sec_five_level_ifc_lattice_and_derived_test_usability(tmp_path: os.Path
             information_class=InformationClass.UNTRUSTED,
         )
     assert exc_untrusted.value.vector_id == "F.2"
+
+
+@pytest.mark.security
+def test_sec_full_lineage_revocation_cascades_across_root_and_siblings(tmp_path: os.PathLike[str]) -> None:
+    """[Vector A.1 & F.2: Lineage Revocation] Revoking any child token revokes root, sibling, and descendant tokens across the lineage."""
+    engine = CapabilityEngine()
+    ws = str(tmp_path)
+    root_caveat = CapabilityCaveat(
+        allowed_tools=frozenset({"fs:read", "fs:write"}),
+        path_prefixes=(ws,),
+        max_calls=10,
+        expires_at_unix=time.time() + 300,
+    )
+    root_token = engine.issue_root_token(
+        subject_agent_id="root-orch",
+        task_purpose="Orchestrate workers",
+        caveat=root_caveat,
+    )
+    child_a = engine.delegate_attenuated_token(
+        parent_token=root_token,
+        child_agent_id="worker-a",
+        child_purpose="Read task",
+        narrowed_caveat=replace(root_caveat, allowed_tools=frozenset({"fs:read"}), max_calls=3),
+    )
+    child_b = engine.delegate_attenuated_token(
+        parent_token=root_token,
+        child_agent_id="worker-b",
+        child_purpose="Write task",
+        narrowed_caveat=replace(root_caveat, allowed_tools=frozenset({"fs:write"}), max_calls=3),
+    )
+
+    # Child A trips a canary -> revoke_token(child_a.token_id) revokes the entire lineage
+    engine.revoke_token(child_a.token_id)
+    assert engine.is_revoked(child_a.token_id)
+    assert engine.is_revoked(root_token.token_id)
+    assert engine.is_revoked(child_b.token_id)
+
+    with pytest.raises(CapabilityViolationError):
+        engine.verify_tool_call(token=child_b, agent_id="worker-b", tool_name="fs:write", target_path=os.path.join(ws, "out.txt"))
+
 

@@ -27,7 +27,10 @@ from typing import Dict, FrozenSet, Optional, Set, Tuple
 from activesec.core.capability_token import (
     ALLOWED_ACTIONS_BY_INFO_CLASS,
     ActionClass,
+    CompositeLabel,
     InformationClass,
+    SensitivityLevel,
+    TrustLevel,
     classify_tool_action,
 )
 from activesec.core.component import ComponentSecurityAssessment, SecureComponent
@@ -73,6 +76,7 @@ class ArtifactProvenanceRecord:
     updated_at_unix: float
     content_sha256: str
     declassified_by_ring: Optional[int] = None
+    composite_label: CompositeLabel = CompositeLabel(TrustLevel.TRUSTED, SensitivityLevel.PUBLIC)
 
 
 @dataclass(slots=True)
@@ -81,6 +85,7 @@ class AgentFlowState:
 
     agent_id: str
     information_class: InformationClass = InformationClass.TRUSTED
+    composite_label: CompositeLabel = CompositeLabel(TrustLevel.TRUSTED, SensitivityLevel.PUBLIC)
     absorbed_side_effects: Set[str] = field(default_factory=set)
     touched_files: Set[str] = field(default_factory=set)
 
@@ -165,6 +170,18 @@ class WorkspaceProvenanceLedger(SecureComponent):
             return InformationClass.UNTRUSTED
         return InformationClass.TRUSTED
 
+    @classmethod
+    def _infer_initial_composite_label(cls, real_path: str) -> CompositeLabel:
+        """Infer initial 2D product-lattice label (tau, sigma) for a pre-existing file."""
+        lower_base = os.path.basename(real_path).lower()
+        lower_full = real_path.lower()
+        is_sens = any(m in lower_base or m in lower_full for m in DEFAULT_SENSITIVE_PATH_MARKERS)
+        is_untrusted = any(m in lower_base or m in lower_full for m in DEFAULT_UNTRUSTED_PATH_MARKERS)
+        return CompositeLabel(
+            trust=TrustLevel.UNTRUSTED if is_untrusted else TrustLevel.TRUSTED,
+            sensitivity=SensitivityLevel.SENSITIVE if is_sens else SensitivityLevel.PUBLIC,
+        )
+
     def tag_file_provenance(
         self,
         path: str,
@@ -173,10 +190,12 @@ class WorkspaceProvenanceLedger(SecureComponent):
         origin_side_effects: FrozenSet[str] = frozenset(),
         actor_id: str = "ring0-seed",
         content: str = "",
+        composite_label: Optional[CompositeLabel] = None,
     ) -> ArtifactProvenanceRecord:
         """Explicitly assign or seed the provenance label `\\ell(f)` for a workspace path."""
         real_path = os.path.realpath(path)
         digest = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
+        comp = composite_label if composite_label is not None else information_class.to_composite_label()
         rec = ArtifactProvenanceRecord(
             canonical_path=real_path,
             information_class=information_class,
@@ -184,6 +203,7 @@ class WorkspaceProvenanceLedger(SecureComponent):
             written_by_agent=actor_id,
             updated_at_unix=time.time(),
             content_sha256=digest,
+            composite_label=comp,
         )
         self._file_records[real_path] = rec
         return rec
@@ -194,11 +214,27 @@ class WorkspaceProvenanceLedger(SecureComponent):
         information_class: InformationClass,
         *,
         side_effects: FrozenSet[str] = frozenset(),
+        composite_label: Optional[CompositeLabel] = None,
     ) -> AgentFlowState:
         """Monotonically join ``information_class`` and ``side_effects`` into ``agent_id``'s session state."""
         state = self.get_agent_state(agent_id)
         state.information_class = state.information_class.join(information_class)
+        incoming_comp = composite_label if composite_label is not None else information_class.to_composite_label()
+        state.composite_label = state.composite_label.join(incoming_comp)
         state.absorbed_side_effects.update(side_effects)
+        return state
+
+    def sanitize_agent_representation(self, agent_id: str) -> AgentFlowState:
+        """Structural representation cleaning (Definition 3.3 / Proposition A.2).
+
+        Lowers provenance trust tau |-> SANITIZED while leaving confidentiality sigma unchanged
+        (so a Sensitive secret is never accidentally declassified by syntax/Unicode cleaning).
+        """
+        state = self.get_agent_state(agent_id)
+        state.composite_label = state.composite_label.sanitize()
+        state.information_class = state.composite_label.to_information_class
+        if state.composite_label.sensitivity == SensitivityLevel.PUBLIC:
+            state.absorbed_side_effects.discard("READ_EXTERNAL")
         return state
 
     def derive_agent_summary(self, agent_id: str) -> AgentFlowState:
@@ -208,13 +244,20 @@ class WorkspaceProvenanceLedger(SecureComponent):
         only `UNTRUSTED` external input transitions to `DERIVED` structured plan/edit state.
         """
         state = self.get_agent_state(agent_id)
-        if state.information_class == InformationClass.SENSITIVE:
+        if (
+            state.information_class == InformationClass.SENSITIVE
+            or state.composite_label.sensitivity == SensitivityLevel.SENSITIVE
+        ):
             raise CapabilityViolationError(
                 f"Cannot downgrade SENSITIVE provenance for agent '{agent_id}' to DERIVED without declassification.",
                 vector_id="F.2",
                 component_id="sod_policy",
             )
         state.information_class = InformationClass.DERIVED
+        state.composite_label = CompositeLabel(
+            trust=TrustLevel.DERIVED,
+            sensitivity=state.composite_label.sensitivity,
+        )
         state.absorbed_side_effects.discard("READ_EXTERNAL")
         return state
 
@@ -225,7 +268,7 @@ class WorkspaceProvenanceLedger(SecureComponent):
         authorized_by_ring: int = 1,
         sanitized_content: str = "",
     ) -> ArtifactProvenanceRecord:
-        """Explicitly declassify a workspace file to `SANITIZED` after deterministic DLP scrubbing or Ring-1 review."""
+        """Explicitly declassify a workspace file to `(SANITIZED, PUBLIC)` after deterministic DLP scrubbing or Ring-1 review."""
         if authorized_by_ring not in (0, 1):
             raise CapabilityViolationError(
                 f"Artifact declassification requires Ring 0 or Ring 1 authority (got Ring {authorized_by_ring}).",
@@ -242,6 +285,7 @@ class WorkspaceProvenanceLedger(SecureComponent):
             updated_at_unix=time.time(),
             content_sha256=digest,
             declassified_by_ring=authorized_by_ring,
+            composite_label=CompositeLabel(TrustLevel.SANITIZED, SensitivityLevel.PUBLIC),
         )
         self._file_records[real_path] = rec
         return rec
@@ -260,6 +304,7 @@ class WorkspaceProvenanceLedger(SecureComponent):
 
         if rec is not None:
             file_class = rec.information_class
+            file_comp = rec.composite_label
             file_effects = set(rec.origin_side_effects)
         else:
             file_class = (
@@ -267,13 +312,19 @@ class WorkspaceProvenanceLedger(SecureComponent):
                 if explicit_file_class is not None
                 else self._infer_initial_file_label(real_path)
             )
+            file_comp = (
+                explicit_file_class.to_composite_label()
+                if explicit_file_class is not None
+                else self._infer_initial_composite_label(real_path)
+            )
             file_effects = set()
-            if file_class == InformationClass.SENSITIVE:
+            if file_class == InformationClass.SENSITIVE or file_comp.sensitivity == SensitivityLevel.SENSITIVE:
                 file_effects.add("READ_SENSITIVE")
-            elif file_class == InformationClass.UNTRUSTED:
+            if file_class == InformationClass.UNTRUSTED or file_comp.trust == TrustLevel.UNTRUSTED:
                 file_effects.add("READ_EXTERNAL")
 
         state.information_class = state.information_class.join(file_class)
+        state.composite_label = state.composite_label.join(file_comp)
         state.absorbed_side_effects.update(file_effects)
         state.touched_files.add(real_path)
         return state
@@ -291,20 +342,23 @@ class WorkspaceProvenanceLedger(SecureComponent):
         state = self.get_agent_state(agent_id)
 
         effective_class = state.information_class
+        effective_comp = state.composite_label
         if explicit_class is not None:
             effective_class = effective_class.join(explicit_class)
+            effective_comp = effective_comp.join(explicit_class.to_composite_label())
 
         existing = self._file_records.get(real_path)
         if existing is not None and existing.declassified_by_ring is None:
             effective_class = effective_class.join(existing.information_class)
+            effective_comp = effective_comp.join(existing.composite_label)
             combined_effects = set(existing.origin_side_effects) | set(state.absorbed_side_effects)
         else:
             combined_effects = set(state.absorbed_side_effects)
 
         combined_effects.add("WRITE_LOCAL")
-        if effective_class == InformationClass.SENSITIVE:
+        if effective_class == InformationClass.SENSITIVE or effective_comp.sensitivity == SensitivityLevel.SENSITIVE:
             combined_effects.add("READ_SENSITIVE")
-        elif effective_class == InformationClass.UNTRUSTED:
+        if effective_class == InformationClass.UNTRUSTED or effective_comp.trust == TrustLevel.UNTRUSTED:
             combined_effects.add("READ_EXTERNAL")
 
         digest = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
@@ -315,6 +369,7 @@ class WorkspaceProvenanceLedger(SecureComponent):
             written_by_agent=agent_id,
             updated_at_unix=time.time(),
             content_sha256=digest,
+            composite_label=effective_comp,
         )
         self._file_records[real_path] = rec
         state.touched_files.add(real_path)
@@ -337,8 +392,10 @@ class WorkspaceProvenanceLedger(SecureComponent):
         """
         state = self.get_agent_state(agent_id)
         effective_class = state.information_class
+        effective_comp = state.composite_label
         if explicit_information_class is not None:
             effective_class = effective_class.join(explicit_information_class)
+            effective_comp = effective_comp.join(explicit_information_class.to_composite_label())
 
         active_effects = set(state.absorbed_side_effects)
 
@@ -348,13 +405,16 @@ class WorkspaceProvenanceLedger(SecureComponent):
             rec = self._file_records.get(real_path)
             if rec is not None:
                 effective_class = effective_class.join(rec.information_class)
+                effective_comp = effective_comp.join(rec.composite_label)
                 active_effects.update(rec.origin_side_effects)
             else:
                 inferred = self._infer_initial_file_label(real_path)
+                inferred_comp = self._infer_initial_composite_label(real_path)
                 effective_class = effective_class.join(inferred)
-                if inferred == InformationClass.SENSITIVE:
+                effective_comp = effective_comp.join(inferred_comp)
+                if inferred == InformationClass.SENSITIVE or inferred_comp.sensitivity == SensitivityLevel.SENSITIVE:
                     active_effects.add("READ_SENSITIVE")
-                elif inferred == InformationClass.UNTRUSTED:
+                if inferred == InformationClass.UNTRUSTED or inferred_comp.trust == TrustLevel.UNTRUSTED:
                     active_effects.add("READ_EXTERNAL")
 
         action_class = classify_tool_action(
@@ -381,7 +441,7 @@ class WorkspaceProvenanceLedger(SecureComponent):
                         component_id="sod_policy",
                     )
 
-        allowed_actions = ALLOWED_ACTIONS_BY_INFO_CLASS[effective_class]
+        allowed_actions = ALLOWED_ACTIONS_BY_INFO_CLASS[effective_class] & effective_comp.allowed_actions
         if action_class not in allowed_actions:
             if effective_class in (InformationClass.SENSITIVE, InformationClass.UNTRUSTED) and action_class in (
                 ActionClass.NETWORK_EGRESS,
@@ -395,7 +455,7 @@ class WorkspaceProvenanceLedger(SecureComponent):
                 )
             raise CapabilityViolationError(
                 f"Compositional IFC violation: action '{action_class.value}' ({tool_name}) "
-                f"is not permitted under provenance level '{effective_class.value}'.",
+                f"is not permitted under provenance level '{effective_class.value}' ({effective_comp.trust.value}, {effective_comp.sensitivity.value}).",
                 vector_id="F.2",
                 component_id="sod_policy",
             )

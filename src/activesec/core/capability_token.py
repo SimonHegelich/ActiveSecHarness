@@ -22,8 +22,50 @@ from activesec.core.component import ComponentSecurityAssessment, SecureComponen
 from activesec.core.exceptions import CapabilityViolationError
 
 
+class TrustLevel(str, enum.Enum):
+    """4-Element Provenance Trust Lattice L_trust = {TRUSTED <= SANITIZED <= DERIVED <= UNTRUSTED}."""
+
+    TRUSTED = "TRUSTED"
+    SANITIZED = "SANITIZED"
+    DERIVED = "DERIVED"
+    UNTRUSTED = "UNTRUSTED"
+
+    @property
+    def rank(self) -> int:
+        return _TRUST_RANKS[self]
+
+    def join(self, other: "TrustLevel") -> "TrustLevel":
+        """Least upper bound (sqcup) in L_trust."""
+        return self if self.rank >= other.rank else other
+
+
+_TRUST_RANKS: Mapping[TrustLevel, int] = {
+    TrustLevel.TRUSTED: 0,
+    TrustLevel.SANITIZED: 1,
+    TrustLevel.DERIVED: 2,
+    TrustLevel.UNTRUSTED: 3,
+}
+
+
+class SensitivityLevel(str, enum.Enum):
+    """2-Element Confidentiality Lattice L_sens = {PUBLIC <= SENSITIVE}."""
+
+    PUBLIC = "PUBLIC"
+    SENSITIVE = "SENSITIVE"
+
+    @property
+    def rank(self) -> int:
+        return 1 if self == SensitivityLevel.SENSITIVE else 0
+
+    def join(self, other: "SensitivityLevel") -> "SensitivityLevel":
+        """Least upper bound (vee) in L_sens."""
+        if self == SensitivityLevel.SENSITIVE or other == SensitivityLevel.SENSITIVE:
+            return SensitivityLevel.SENSITIVE
+        return SensitivityLevel.PUBLIC
+
+
 class InformationClass(str, enum.Enum):
-    """5-Level Information-Flow Taint & Sensitivity Lattice.
+    """5-Level Information-Flow Taint & Sensitivity Lattice (compatible projection of L_trust x L_sens).
 
     Integrity/Taint ordering:
         TRUSTED (0) <= SANITIZED (1) <= DERIVED (2) <= UNTRUSTED (3)
@@ -49,6 +91,12 @@ class InformationClass(str, enum.Enum):
             return InformationClass.SENSITIVE
         return self if self.lattice_rank >= other.lattice_rank else other
 
+    def to_composite_label(self) -> "CompositeLabel":
+        """Convert a 1D InformationClass into the 2D Product Lattice L_trust x L_sens."""
+        if self == InformationClass.SENSITIVE:
+            return CompositeLabel(trust=TrustLevel.TRUSTED, sensitivity=SensitivityLevel.SENSITIVE)
+        return CompositeLabel(trust=TrustLevel(self.value), sensitivity=SensitivityLevel.PUBLIC)
+
 
 _LATTICE_RANKS: Mapping[InformationClass, int] = {
     InformationClass.TRUSTED: 0,
@@ -57,6 +105,52 @@ _LATTICE_RANKS: Mapping[InformationClass, int] = {
     InformationClass.UNTRUSTED: 3,
     InformationClass.SENSITIVE: 4,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class CompositeLabel:
+    """2D Product Information-Flow Label ell = (tau, sigma) in L = L_trust x L_sens (Definition 3.3)."""
+
+    trust: TrustLevel = TrustLevel.TRUSTED
+    sensitivity: SensitivityLevel = SensitivityLevel.PUBLIC
+
+    def join(self, other: "CompositeLabel") -> "CompositeLabel":
+        """Componentwise join: (tau_1, sigma_1) sqcup (tau_2, sigma_2) = (tau_1 sqcup tau_2, sigma_1 vee sigma_2)."""
+        return CompositeLabel(
+            trust=self.trust.join(other.trust),
+            sensitivity=self.sensitivity.join(other.sensitivity),
+        )
+
+    def sanitize(self) -> "CompositeLabel":
+        """Structural representation cleaning (e.g. stripping Trojan Unicode / deobfuscating).
+
+        Maps (tau, sigma) |-> (SANITIZED, sigma) while leaving sigma unchanged (Proposition A.2).
+        """
+        new_trust = TrustLevel.SANITIZED if self.trust != TrustLevel.TRUSTED else TrustLevel.TRUSTED
+        return CompositeLabel(trust=new_trust, sensitivity=self.sensitivity)
+
+    def redact_or_declassify(self) -> "CompositeLabel":
+        """Authorized DLP secret redaction or Ring-1 declassification waiver.
+
+        Clears sigma |-> PUBLIC while preserving or sanitizing tau (Proposition A.2).
+        """
+        new_trust = TrustLevel.SANITIZED if self.trust == TrustLevel.UNTRUSTED else self.trust
+        return CompositeLabel(trust=new_trust, sensitivity=SensitivityLevel.PUBLIC)
+
+    @property
+    def to_information_class(self) -> InformationClass:
+        """Project (tau, sigma) onto the 5-level InformationClass enum."""
+        if self.sensitivity == SensitivityLevel.SENSITIVE:
+            return InformationClass.SENSITIVE
+        return InformationClass(self.trust.value)
+
+    @property
+    def allowed_actions(self) -> FrozenSet["ActionClass"]:
+        """Return the set of ActionClasses permitted under (tau, sigma) in the product lattice."""
+        trust_allowed = ALLOWED_ACTIONS_BY_TRUST[self.trust]
+        if self.sensitivity == SensitivityLevel.SENSITIVE:
+            return trust_allowed & ALLOWED_ACTIONS_FOR_SENSITIVE
+        return trust_allowed
 
 
 class ActionClass(str, enum.Enum):
@@ -80,10 +174,10 @@ class ActionClass(str, enum.Enum):
 #   all shell execution, and network egress.
 # - SENSITIVE: Permits only local read/write inside workspace; blocks all shell execution
 #   and network egress unless explicitly declassified to SANITIZED.
-ALLOWED_ACTIONS_BY_INFO_CLASS: Mapping[InformationClass, FrozenSet[ActionClass]] = {
-    InformationClass.TRUSTED: frozenset(ActionClass),
-    InformationClass.SANITIZED: frozenset(ActionClass),
-    InformationClass.DERIVED: frozenset(
+ALLOWED_ACTIONS_BY_TRUST: Mapping[TrustLevel, FrozenSet[ActionClass]] = {
+    TrustLevel.TRUSTED: frozenset(ActionClass),
+    TrustLevel.SANITIZED: frozenset(ActionClass),
+    TrustLevel.DERIVED: frozenset(
         {
             ActionClass.FS_READ_WORKSPACE,
             ActionClass.FS_WRITE_WORKSPACE,
@@ -91,17 +185,26 @@ ALLOWED_ACTIONS_BY_INFO_CLASS: Mapping[InformationClass, FrozenSet[ActionClass]]
             ActionClass.SHELL_TEST_ISOLATED,
         }
     ),
-    InformationClass.UNTRUSTED: frozenset(
+    TrustLevel.UNTRUSTED: frozenset(
         {
             ActionClass.FS_READ_WORKSPACE,
         }
     ),
-    InformationClass.SENSITIVE: frozenset(
-        {
-            ActionClass.FS_READ_WORKSPACE,
-            ActionClass.FS_WRITE_WORKSPACE,
-        }
-    ),
+}
+
+ALLOWED_ACTIONS_FOR_SENSITIVE: FrozenSet[ActionClass] = frozenset(
+    {
+        ActionClass.FS_READ_WORKSPACE,
+        ActionClass.FS_WRITE_WORKSPACE,
+    }
+)
+
+ALLOWED_ACTIONS_BY_INFO_CLASS: Mapping[InformationClass, FrozenSet[ActionClass]] = {
+    InformationClass.TRUSTED: frozenset(ActionClass),
+    InformationClass.SANITIZED: frozenset(ActionClass),
+    InformationClass.DERIVED: ALLOWED_ACTIONS_BY_TRUST[TrustLevel.DERIVED],
+    InformationClass.UNTRUSTED: ALLOWED_ACTIONS_BY_TRUST[TrustLevel.UNTRUSTED],
+    InformationClass.SENSITIVE: ALLOWED_ACTIONS_FOR_SENSITIVE,
 }
 
 ISOLATED_TEST_BINARIES: FrozenSet[str] = frozenset({"pytest", "python", "python3"})
@@ -446,9 +549,34 @@ class CapabilityEngine(SecureComponent):
         self._issued_tokens[child_id] = child_tok
         return child_tok
 
-    def revoke_token(self, token_id: str) -> None:
-        """Immediately revoke a token ID (and any chain referencing it as parent)."""
+    def revoke_token(self, token_id: str, *, revoke_entire_lineage: bool = True) -> None:
+        """Immediately revoke a token ID and, by default, its entire ancestor/descendant lineage."""
         self._revoked_tokens.add(token_id)
+        if not revoke_entire_lineage:
+            return
+
+        # 1. Walk up to the root of the lineage if tracked in _issued_tokens
+        root_id = token_id
+        visited: set[str] = {token_id}
+        while True:
+            tok_obj = self._issued_tokens.get(root_id)
+            if tok_obj is None or tok_obj.parent_token_id is None or tok_obj.parent_token_id in visited:
+                break
+            root_id = tok_obj.parent_token_id
+            visited.add(root_id)
+        self._revoked_tokens.add(root_id)
+
+        # 2. Revoke every issued token whose ancestor chain touches root_id or token_id
+        for cand_id, cand_tok in self._issued_tokens.items():
+            curr = cand_tok.parent_token_id
+            chain_seen: set[str] = {cand_id}
+            while curr is not None and curr not in chain_seen:
+                if curr in self._revoked_tokens:
+                    self._revoked_tokens.add(cand_id)
+                    break
+                chain_seen.add(curr)
+                parent_obj = self._issued_tokens.get(curr)
+                curr = parent_obj.parent_token_id if parent_obj is not None else None
 
     def _verify_signature_and_revocation(self, token: CapabilityToken) -> None:
         if not token.caveats:

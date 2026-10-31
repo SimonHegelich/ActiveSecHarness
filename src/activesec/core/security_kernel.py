@@ -468,7 +468,16 @@ class SecurityKernel(SecureComponent):
             body = str(request.arguments.get("body", ""))
             self._canary_guard.check_stream_for_canaries(body, active_token_id=token.token_id)
             self._credential_guard.assert_no_cleartext_secrets(body)
-            endpoint = self._network_guard.validate_url_target(url)
+            token_cidrs = frozenset(
+                dest
+                for cav in token.caveats
+                for dest in cav.network_destinations
+                if "/" in dest
+            )
+            endpoint = self._network_guard.validate_url_target(
+                url,
+                extra_allowed_cidrs=token_cidrs,
+            )
             return (
                 f"Verified HTTPS TLS 1.3 endpoint {endpoint.hostname}:{endpoint.port} (IPs: {', '.join(endpoint.pinned_ips)})",
                 False,
