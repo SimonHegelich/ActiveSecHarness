@@ -203,6 +203,10 @@ def parse_repl_line(line: str) -> ReplCommand:
         return ReplCommand(kind="learn")
     if lower == "/test" or lower.startswith("/test "):
         return ReplCommand(kind="test", payload=text[len("/test") :].strip())
+    if lower == "/waive" or lower.startswith("/waive "):
+        return ReplCommand(kind="waive", payload=text[len("/waive") :].strip())
+    if lower == "/promote-test" or lower.startswith("/promote-test "):
+        return ReplCommand(kind="promote_test", payload=text[len("/promote-test") :].strip())
     if lower in {"/models", "/model"} or lower.startswith("/models ") or lower.startswith("/model "):
         parts = text.split(maxsplit=1)
         return ReplCommand(kind="models", payload=parts[1].strip() if len(parts) > 1 else "")
@@ -653,7 +657,7 @@ def run_interactive_chat(
             file=output_stream,
         )
         print(f"Workspace: {runtime.workspace_dir}", file=output_stream)
-        print("Commands: /status  /models  /test  /learn  /wiki  /quit", file=output_stream)
+        print("Commands: /status  /models  /test  /waive  /promote-test  /learn  /wiki  /quit", file=output_stream)
         if runtime.provider == "ollama" and not runtime.digest_pinning_enabled:
             print(
                 "[residual_risk] Ollama model digest pinning is not configured "
@@ -671,9 +675,73 @@ def run_interactive_chat(
             break
         if cmd.kind == "unknown":
             print(
-                f"[error] Unknown command '{cmd.payload}'. Try /status, /models, /test, /learn, /wiki, /quit.",
+                f"[error] Unknown command '{cmd.payload}'. Try /status, /models, /test, /waive, /promote-test, /learn, /wiki, /quit.",
                 file=output_stream,
             )
+            continue
+        if cmd.kind == "waive":
+            parts = cmd.payload.split(maxsplit=2)
+            if len(parts) < 3:
+                print(
+                    "[error] Usage: `/waive <filename> <rule_id> <justification>` (e.g. `/waive build_zip.py EXTRACTALL Trusted internal fixture`)",
+                    file=output_stream,
+                )
+                continue
+            fname, rule_id, justification = parts[0], parts[1], parts[2]
+            target_f = fname if os.path.isabs(fname) else os.path.join(runtime.workspace_dir, fname)
+            try:
+                waiver = runtime.code_verifier.grant_context_waiver(
+                    file_path=target_f,
+                    rule_id=rule_id,
+                    justification=justification,
+                    granted_by_ring=1,
+                )
+                runtime.audit_log.append_event(
+                    event_type="RING1_CONTEXT_WAIVER_GRANTED",
+                    actor_id="ring1_operator",
+                    ring_level=1,
+                    vector_id="NONE",
+                    details={
+                        "file_path": waiver.canonical_file_path,
+                        "justification": waiver.justification,
+                        "rule_id": waiver.rule_id,
+                        "waiver_id": waiver.waiver_id,
+                    },
+                )
+                print(
+                    f"[waive] Granted Ring-1 ContextWaiver '{waiver.waiver_id}' for rule '{waiver.rule_id}' on {os.path.basename(waiver.canonical_file_path)}.",
+                    file=output_stream,
+                )
+            except ActiveSecError as exc:
+                print(format_security_error(exc), file=output_stream)
+            continue
+        if cmd.kind == "promote_test":
+            test_id = cmd.payload.strip()
+            if not test_id:
+                print("[error] Usage: `/promote-test <test_id>`", file=output_stream)
+                continue
+            try:
+                promoted = runtime.dual_reviewer.test_synthesizer.promote_verified_test(
+                    test_id,
+                    authorized_by_ring=1,
+                )
+                runtime.audit_log.append_event(
+                    event_type="RING1_TEST_PROMOTED_TO_CATALOG",
+                    actor_id="ring1_operator",
+                    ring_level=1,
+                    vector_id="NONE",
+                    details={
+                        "target_file": promoted.target_file_path,
+                        "test_id": promoted.test_id,
+                        "test_script": promoted.test_script_path,
+                    },
+                )
+                print(
+                    f"[promote-test] Promoted verified test '{promoted.test_id}' into reusable project catalog.",
+                    file=output_stream,
+                )
+            except ActiveSecError as exc:
+                print(format_security_error(exc), file=output_stream)
             continue
         if cmd.kind == "status":
             for line in status_lines(runtime):

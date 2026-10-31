@@ -32,6 +32,7 @@ from activesec.core.exceptions import ActiveSecError, CodeSecurityVerificationEr
 from activesec.core.user_wiki_manager import UserWikiManager
 from activesec.guards.code_verifier import CodeVerifier, DeterministicVerificationReport
 from activesec.harness.model_gateway import ChatMessage, ModelGateway, ModelResponse, ModelRole
+from activesec.harness.test_synthesizer import SecurityTestSynthesizer, SynthesizedSecurityTest
 
 
 SMALL_LOCAL_MODEL_HINTS: Tuple[str, ...] = (
@@ -149,6 +150,7 @@ class VerifiedCodingLoopResult:
     final_verdict: SecurityReviewVerdict
     repair_history: Tuple[RepairIterationRecord, ...]
     user_wiki_lesson_path: Optional[str]
+    synthesized_test: Optional[SynthesizedSecurityTest] = None
 
 
 class DualModelReviewer(SecureComponent):
@@ -160,6 +162,7 @@ class DualModelReviewer(SecureComponent):
         gateway: ModelGateway,
         code_verifier: Optional[CodeVerifier] = None,
         user_wiki_manager: Optional[UserWikiManager] = None,
+        test_synthesizer: Optional[SecurityTestSynthesizer] = None,
         reviewer_provider: str = "openrouter",
         reviewer_model: str = "qwen/qwen3-coder",
         fallback_local_reviewer_model: str = "qwen3:4b",
@@ -169,6 +172,14 @@ class DualModelReviewer(SecureComponent):
         self._gateway: ModelGateway = gateway
         self._code_verifier: CodeVerifier = code_verifier or CodeVerifier()
         self._user_wiki_manager: Optional[UserWikiManager] = user_wiki_manager
+        self._test_synthesizer: SecurityTestSynthesizer = test_synthesizer or SecurityTestSynthesizer(
+            gateway=self._gateway,
+            code_verifier=self._code_verifier,
+            synthesizer_provider=reviewer_provider,
+            synthesizer_model=reviewer_model,
+            fallback_local_model=fallback_local_reviewer_model,
+            openrouter_key_available=openrouter_key_available,
+        )
         self._reviewer_provider: str = reviewer_provider
         self._reviewer_model: str = reviewer_model
         self._fallback_local_reviewer_model: str = fallback_local_reviewer_model
@@ -210,6 +221,10 @@ class DualModelReviewer(SecureComponent):
     @property
     def reviewer_model(self) -> str:
         return self._reviewer_model
+
+    @property
+    def test_synthesizer(self) -> SecurityTestSynthesizer:
+        return self._test_synthesizer
 
     def configure_reviewer(self, *, provider: str, model: str, openrouter_key_available: Optional[bool] = None) -> None:
         """Update the active Stage-B reviewer provider and model."""
@@ -419,6 +434,20 @@ class DualModelReviewer(SecureComponent):
         )
         current_verdict = initial_verdict
         history: List[RepairIterationRecord] = []
+        synthesized_test: Optional[SynthesizedSecurityTest] = None
+
+        # If Reviewer (Stage B) flagged a vulnerability not yet caught by Stage-A deterministic checks,
+        # launch the Test-Synthesis Subtask (Red-Green-Benign Triad) before repairing!
+        if (
+            not initial_verdict.approved_for_execution
+            and initial_verdict.deterministic_report.approved_for_execution
+        ):
+            synthesized_test = self._test_synthesizer.synthesize_and_verify_test(
+                vulnerable_file_path=real_file,
+                vulnerability_explanation=initial_verdict.plain_language_explanation,
+                how_to_fix=initial_verdict.how_to_fix,
+                workspace_dir=real_ws,
+            )
 
         if not current_verdict.approved_for_execution and auto_repair:
             for iteration in range(1, max_repair_iterations + 1):
@@ -537,6 +566,13 @@ class DualModelReviewer(SecureComponent):
             )
             lesson_path = str(self._user_wiki_manager.user_wiki_dir / "lessons" / f"{topic_slug}.md")
 
+        if synthesized_test is not None and current_verdict.approved_for_execution:
+            synthesized_test = self._test_synthesizer.verify_green_on_repaired(
+                synthesized_test.test_id,
+                real_file,
+                workspace_dir=real_ws,
+            )
+
         return VerifiedCodingLoopResult(
             file_path=real_file,
             approved_for_execution=current_verdict.approved_for_execution,
@@ -545,6 +581,7 @@ class DualModelReviewer(SecureComponent):
             final_verdict=current_verdict,
             repair_history=tuple(history),
             user_wiki_lesson_path=lesson_path,
+            synthesized_test=synthesized_test,
         )
 
     @staticmethod
@@ -567,6 +604,13 @@ class DualModelReviewer(SecureComponent):
             )
             if init.recommended_fixer_model:
                 lines.append(f"Recommended Stronger Model:      {init.recommended_fixer_model}")
+            if result.synthesized_test is not None:
+                st = result.synthesized_test
+                lines.append(
+                    f"Synthesized Deterministic Test:  {st.test_id} "
+                    f"(Red={st.red_on_vulnerable_passed}, Benign={st.benign_safe_passed}, "
+                    f"Green={st.green_on_repaired_passed}) -> use `/promote-test {st.test_id}` to add to catalog"
+                )
 
             if result.iterations_run > 0:
                 last_rec = result.repair_history[-1]

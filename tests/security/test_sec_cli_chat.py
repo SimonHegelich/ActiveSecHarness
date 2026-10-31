@@ -31,6 +31,8 @@ def test_sec_cli_chat_parser_commands() -> None:
     assert parse_repl_line("/wiki").kind == "wiki"
     assert parse_repl_line("/learn").kind == "learn"
     assert parse_repl_line("/test").kind == "test"
+    assert parse_repl_line("/waive f.py EXTRACTALL trusted").kind == "waive"
+    assert parse_repl_line("/promote-test syntest_123").kind == "promote_test"
     assert parse_repl_line("/models").kind == "models"
     assert parse_repl_line("/model reviewer openrouter/qwen/qwen3-coder").kind == "models"
     assert parse_repl_line("/nope").kind == "unknown"
@@ -353,4 +355,36 @@ def test_sec_cli_chat_truncated_ollama_json_and_test_triggers_repair(tmp_path: P
     assert "Auto-Repair Loop:" in text
     assert "[test:safe_extract.py:post-repair] APPROVED (SAFE)" in text
     assert "Cases Completed: 2" in text or "Cases Completed: 1" in text
+
+
+@pytest.mark.security
+def test_sec_cli_chat_waive_command_permits_trusted_internal_extractall(tmp_path: Path) -> None:
+    """[Vector A.3 & B.1: Ring-1 ContextWaiver in Chat] Verifies /waive grants a logged Ring-1 waiver for a specific file."""
+    workspace = tmp_path / "workspace_live"
+    workspace.mkdir()
+    internal_zip = workspace / "trusted_fixture_unpack.py"
+    internal_zip.write_text(
+        "import zipfile\ndef unpack_fixture(z, d):\n    with zipfile.ZipFile(z) as zf:\n        zf.extractall(d)\n",
+        encoding="utf-8",
+    )
+
+    out = StringIO()
+    rc = run_scripted_chat(
+        [
+            "/waive trusted_fixture_unpack.py EXTRACTALL Internal SHA256-verified build fixture",
+            "/test",
+            "/quit",
+        ],
+        workspace_dir=str(workspace),
+        provider="openrouter",
+        model="qwen/qwen3-coder",
+        user_wiki_dir=str(tmp_path / "wiki_user"),
+        transport_func=lambda *_a, **_kw: b"{}",
+        api_key="offline-test-key",
+        output_stream=out,
+    )
+    assert rc == 0
+    text = out.getvalue()
+    assert "Granted Ring-1 ContextWaiver" in text
+    assert "[test:trusted_fixture_unpack.py] APPROVED (SAFE)" in text
 
