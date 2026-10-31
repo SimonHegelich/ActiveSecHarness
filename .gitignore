@@ -34,3 +34,6 @@ htmlcov/
 
 # Interactive chat workspace (Ring-3 agent sandbox)
 /workspace_live/
+
+# LLM judge disk cache
+results/.llm_judge_cache.json
