@@ -502,6 +502,40 @@ class ModelGateway(SecureComponent):
             raw_command=str(raw_command) if raw_command is not None else None,
         )
 
+    @staticmethod
+    def _extract_embedded_tool_call(content: str) -> Optional[ToolCallRequest]:
+        """Extract a tool_call JSON object from raw model text, markdown fences, or slightly truncated JSON."""
+        stripped = content.strip()
+        if not stripped:
+            return None
+
+        # Strip optional ```json ... ``` or ``` ... ``` fences
+        if stripped.startswith("```"):
+            lines = stripped.splitlines()
+            if len(lines) >= 2:
+                inner_lines = lines[1:]
+                if inner_lines and inner_lines[-1].strip().startswith("```"):
+                    inner_lines = inner_lines[:-1]
+                stripped = "\n".join(inner_lines).strip()
+
+        if '"tool_name"' not in stripped:
+            return None
+
+        start_idx = stripped.find("{")
+        if start_idx == -1:
+            return None
+        candidate = stripped[start_idx:]
+
+        # Try exact JSON parse, then repair missing closing braces (common with small local models)
+        for suffix in ("", "}", "}}", '"}', '"}}'):
+            try:
+                embedded = json.loads(candidate + suffix)
+                if isinstance(embedded, Mapping) and "tool_name" in embedded:
+                    return ModelGateway._parse_tool_call_dict(embedded)
+            except (json.JSONDecodeError, ModelSecurityError):
+                continue
+        return None
+
     def _parse_and_validate_response(
         self,
         raw_bytes: bytes,
@@ -563,13 +597,8 @@ class ModelGateway(SecureComponent):
         self._inspect_ingress_text(content)
 
         # Also support structured JSON tool_call embedded in content if tool_call not already set
-        if tool_call is None and content.strip().startswith("{") and '"tool_name"' in content:
-            try:
-                embedded = json.loads(content.strip())
-                if isinstance(embedded, Mapping) and "tool_name" in embedded:
-                    tool_call = self._parse_tool_call_dict(embedded)
-            except json.JSONDecodeError:
-                pass
+        if tool_call is None:
+            tool_call = self._extract_embedded_tool_call(content)
 
         return ModelResponse(
             content=content,

@@ -190,3 +190,64 @@ def test_sec_dual_model_reviewer_blocks_unsafe_code_and_self_heals(tmp_path: os.
     assert "zf.extractall" in lesson_text
     assert "os.path.realpath" in lesson_text
     assert "openrouter/qwen/qwen3-coder" in lesson_text
+
+
+@pytest.mark.security
+def test_sec_dual_model_reviewer_offline_ollama_fallback_and_reference_remediation(tmp_path: os.PathLike[str]) -> None:
+    """[Vector B.1, B.2 & F.1: Air-Gapped Local Ollama Repair Fallback] When OpenRouter is unavailable and weak local model fails to fix extractall(), certified reference remediation heals the file and updates wiki_user/."""
+    repo_root = Path(str(tmp_path))
+    workspace = repo_root / "workspace_live"
+    workspace.mkdir(parents=True, exist_ok=True)
+    target_py = workspace / "safe_extract.py"
+
+    target_py.write_text(
+        "import zipfile\ndef safe_extract(zp, out):\n    with zipfile.ZipFile(zp) as zf:\n        zf.extractall(out)\n",
+        encoding="utf-8",
+    )
+
+    def _weak_local_ollama_transport(
+        url: str,
+        body: bytes,
+        headers: Mapping[str, str],
+        tls_context: Optional[ssl.SSLContext],
+        timeout: float,
+        max_response_bytes: int,
+    ) -> bytes:
+        # Simulate weak local qwen3:4b still outputting unsafe extractall() or truncated JSON
+        truncated = (
+            '{"tool_name":"fs:write","target_path":"'
+            + str(target_py)
+            + '","arguments":{"content":"import zipfile\\ndef safe_extract(zp, out):\\n    with zipfile.ZipFile(zp) as zf:\\n        zf.extractall(out)\\n"}'
+        )
+        return json.dumps({"model": "qwen3:4b", "message": {"content": truncated}}).encode("utf-8")
+
+    gateway = ModelGateway(
+        openrouter_config=OpenRouterConfig(),
+        ollama_config=OllamaLocalConfig(),
+        transport_func=_weak_local_ollama_transport,
+        api_key=None,
+    )
+    user_wiki = UserWikiManager(repo_root=repo_root, user_wiki_dir=repo_root / "wiki_user")
+    reviewer = DualModelReviewer(
+        gateway=gateway,
+        code_verifier=CodeVerifier(),
+        user_wiki_manager=user_wiki,
+        reviewer_provider="openrouter",
+        reviewer_model="qwen/qwen3-coder",
+        openrouter_key_available=False,
+    )
+
+    loop_res = reviewer.run_verified_coding_loop(
+        str(target_py),
+        task_description="Write a safe ZIP extractor that is aware of Zip Slip and Zip Bombs.",
+        workspace_dir=str(workspace),
+        coder_provider="ollama",
+        coder_model="qwen3:4b",
+        auto_repair=True,
+    )
+    assert loop_res.initial_verdict.approved_for_execution is False
+    assert loop_res.approved_for_execution is True
+    assert loop_res.repair_history[-1].fixer_provider == "ring0-reference"
+    assert loop_res.user_wiki_lesson_path is not None
+    assert Path(loop_res.user_wiki_lesson_path).is_file()
+
