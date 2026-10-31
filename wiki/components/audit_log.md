@@ -12,7 +12,7 @@
 | **Title** | Ring-0 Hash-Chained, Split-Horizon Encrypted & Sanitized Security Audit Log |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `A.3`, `B.4`, `D.2`, `F.3` |
-| **Source File** | [`src/activesec/core/audit_log.py`](../../src/activesec/core/audit_log.py) (`sha256:4bcaabbc5593`) |
+| **Source File** | [`src/activesec/core/audit_log.py`](../../src/activesec/core/audit_log.py) (`sha256:2faea491ef55`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_audit_log.py`](../../tests/security/test_sec_audit_log.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
 | **Adversarial Security Verification** | **VERIFIED (PASS)** (7 test vectors) |

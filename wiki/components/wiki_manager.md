@@ -12,7 +12,7 @@
 | **Title** | Ring-0 Karpathy Security Wiki Compiler & Runtime Telemetry Synchronizer |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `A.1`, `A.3`, `B.4`, `F.3` |
-| **Source File** | [`src/activesec/core/wiki_manager.py`](../../src/activesec/core/wiki_manager.py) (`sha256:493fb7f3ff96`) |
+| **Source File** | [`src/activesec/core/wiki_manager.py`](../../src/activesec/core/wiki_manager.py) (`sha256:60f8c18cd124`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_wiki_manager.py`](../../tests/security/test_sec_wiki_manager.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
 | **Adversarial Security Verification** | **VERIFIED (PASS)** (3 test vectors) |

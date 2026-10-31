@@ -12,10 +12,10 @@
 | **Title** | Ring-0 Archive Decompression Bomb & Path Traversal Guard |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `B.1`, `B.2` |
-| **Source File** | [`src/activesec/guards/archive_guard.py`](../../src/activesec/guards/archive_guard.py) (`sha256:31fe4b95ec58`) |
+| **Source File** | [`src/activesec/guards/archive_guard.py`](../../src/activesec/guards/archive_guard.py) (`sha256:d9801f8a2703`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_archive_guard.py`](../../tests/security/test_sec_archive_guard.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
-| **Adversarial Security Verification** | **VERIFIED (PASS)** (4 test vectors) |
+| **Adversarial Security Verification** | **VERIFIED (PASS)** (5 test vectors) |
 
 ---
 
@@ -28,9 +28,9 @@ Protects the harness against flat and recursive decompression bombs (ZipBombs), 
 ## 3. Enforced Deterministic Security Invariants
 
 - Never invokes zipfile.extractall() or tarfile.extractall().
-- Streams decompression in 64 KB chunks while counting actual uncompressed bytes against max_single_file_bytes, max_total_uncompressed_bytes, and max_compression_ratio.
-- Rejects symlinks, FIFOs, character/block devices, and setuid/setgid bits via Unix external attributes.
-- Resolves canonical target paths via os.path.realpath() and cleans up the target directory on any violation.
+- Streams decompression into an isolated atomic staging directory (.staging_<random>) using O_NOFOLLOW file descriptors while counting actual uncompressed bytes against max_single_file_bytes, max_total_uncompressed_bytes, and max_compression_ratio.
+- Rejects symlinks, FIFOs, character/block devices, and setuid/setgid bits via Unix external attributes and post-extraction lstat/realpath verification.
+- Verifies canonical path containment against TOCTOU symlink swaps before atomically moving verified files into target_dir.
 
 ---
 
@@ -42,6 +42,7 @@ Protects the harness against flat and recursive decompression bombs (ZipBombs), 
 | `test_sec_zip_slip_path_traversal_blocked` | [Vector B.2: Zip-Slip Path Traversal] Blocks relative ../ and absolute paths in ZIP entries. | **PASS** |
 | `test_sec_symlink_and_setuid_in_archive_blocked` | [Vector B.2: Symlink & Special File Attack] Rejects symlinks and setuid bits inside archives. | **PASS** |
 | `test_sec_recursive_nested_archive_limit_enforced` | [Vector B.1: Recursive ZipBomb] Blocks nested archives exceeding max_nesting_depth. | **PASS** |
+| `test_sec_archive_atomic_staging_and_symlink_target_rejection` | [Vector B.2: TOCTOU Symlink Target Rejection & Atomic Staging] Rejects symlinked target_dir and leaves zero leftover staging directories after extraction. | **PASS** |
 
 ---
 

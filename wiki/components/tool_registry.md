@@ -12,7 +12,7 @@
 | **Title** | Ring-0 Anti-MCP Tool Certification, Agent Qualification & Combinatorial SoD Engine |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `A.1`, `A.3`, `C.2`, `F.2`, `F.3` |
-| **Source File** | [`src/activesec/core/tool_registry.py`](../../src/activesec/core/tool_registry.py) (`sha256:4323ee8c75e6`) |
+| **Source File** | [`src/activesec/core/tool_registry.py`](../../src/activesec/core/tool_registry.py) (`sha256:ecc138758dee`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_tool_registry.py`](../../tests/security/test_sec_tool_registry.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
 | **Adversarial Security Verification** | **VERIFIED (PASS)** (5 test vectors) |
