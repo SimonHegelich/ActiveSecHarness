@@ -81,6 +81,14 @@ class CapabilityEngine(SecureComponent):
         self._call_counts: dict[str, int] = {}
         self._revoked_tokens: set[str] = set()
 
+    def get_call_count(self, token_id: str) -> int:
+        """Return the number of verified tool invocations recorded for ``token_id``."""
+        return int(self._call_counts.get(token_id, 0))
+
+    def is_revoked(self, token_id: str) -> bool:
+        """Return True if ``token_id`` has been revoked."""
+        return token_id in self._revoked_tokens
+
     @classmethod
     def security_assessment(cls) -> ComponentSecurityAssessment:
         return ComponentSecurityAssessment(

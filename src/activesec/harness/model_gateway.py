@@ -92,11 +92,17 @@ class OpenRouterConfig:
 
 @dataclass(frozen=True, slots=True)
 class OllamaLocalConfig:
-    """Immutable hardened configuration for local air-gapped Ollama inference."""
+    """Immutable hardened configuration for local air-gapped Ollama inference.
+
+    Residual risk: when ``expected_sha256_digests`` is empty, ModelGateway still pins the
+    Ollama endpoint to loopback ``http://127.0.0.1:11434`` and blocks mutation APIs
+    (``/api/pull``, ``/api/create``, ``/api/delete``, ``/api/push``, ``/api/copy``), but
+    cannot cryptographically pin a specific model blob until digests are supplied.
+    """
 
     base_url: str = "http://127.0.0.1:11434"
-    coding_model: str = "qwen2.5-coder:7b"
-    explainer_model: str = "qwen2.5-coder:7b"
+    coding_model: str = "qwen3:4b"
+    explainer_model: str = "qwen3:4b"
     redteam_model: str = "dolphin-llama3:8b"
     expected_sha256_digests: Mapping[str, str] = field(default_factory=dict)
     timeout_seconds: float = 30.0

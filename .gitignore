@@ -31,3 +31,6 @@ htmlcov/
 .env.*
 *.pem
 *.key
+
+# Interactive chat workspace (Ring-3 agent sandbox)
+/workspace_live/
