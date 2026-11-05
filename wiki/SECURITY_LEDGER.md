@@ -40,6 +40,6 @@ This ledger is automatically compiled and verified by `WikiManager` ([`src/activ
 
 ## Latest Runtime Security Telemetry (`agent_loop:telemetry-agent`)
 
-- **Audit Chain Verification:** `VERIFIED` (Head SHA-256: `554ff96bcbc07d12`)
+- **Audit Chain Verification:** `VERIFIED` (Head SHA-256: `0a6f3e477b0295b4`)
 - **Total Mediated Events:** 1 (Allowed: 1, Blocked: 0, Canary Tripwires: 0)
 - **Triggered Threat Vectors:** `NONE`

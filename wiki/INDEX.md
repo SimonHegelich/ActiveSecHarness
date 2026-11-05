@@ -69,3 +69,4 @@ Every component in `ActiveSecHarness` is bound by three automated invariants:
 - **[`wiki/vectors/domain_e_sandbox.md`](vectors/domain_e_sandbox.md)** — Domain E: Namespace Isolation, Seccomp & Resource Limits
 - **[`wiki/vectors/domain_f_cognitive.md`](vectors/domain_f_cognitive.md)** — Domain F: Human Social Engineering & Indirect Prompt Injection
 - **[`wiki/vectors/lotlimmune_phase1b.md`](vectors/lotlimmune_phase1b.md)** — LotLImmune Phase 1B comparative defense benchmark (Domains A–F × 4 regimes)
+- **[`wiki/vectors/conseca_trajectory_ablation.md`](vectors/conseca_trajectory_ablation.md)** — LotLImmune Phase 1C (Experiment E3): Conseca trajectory & 2D product-lattice provenance ablation (`KC-T01`–`KC-T12`, `BT-01`–`BT-12`, and $\mathcal{O}(1)$ state-folding scaling)

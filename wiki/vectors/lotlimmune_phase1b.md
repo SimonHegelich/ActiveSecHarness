@@ -26,3 +26,13 @@ PYTHONPATH=src python3 -m activesec.benchmark.benchmark_suite \
 | `hybrid_llm_plus_ring0` | Ring-0 authoritative; LLM advisory (cannot override Ring-0 allow) |
 
 Intervals: Clopper–Pearson exact 95% CIs on ABR/FPR.
+
+## Phase 1C (Experiment E3): Multi-Step Trajectory & Conseca Ablation
+
+```bash
+PYTHONPATH=src python3 -m activesec.benchmark.benchmark_suite \
+  --trajectories-only --output results/lotlimmune_benchmark.json
+```
+
+See **[`wiki/vectors/conseca_trajectory_ablation.md`](conseca_trajectory_ablation.md)** for the full 24-trajectory (`KC-T01`–`KC-T12` and `BT-01`–`BT-12`) comparison across `stateless_task_policy` (Oracle Conseca-style per-action policy: `66.7%` ABR, `0.0%` FPR), `coarse_boolean_taint` (`100.0%` ABR, `83.3%` FPR), and `activesec_product_ledger` (`100.0%` ABR, `0.0%` FPR, $\approx 20.0\ \mu\text{s}$/step $\mathcal{O}(1)$ state-folding scaling across $k \in \{1, 5, 10, 25, 50\}$).
+
