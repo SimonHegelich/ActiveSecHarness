@@ -15,7 +15,7 @@
 | **Source File** | [`src/activesec/core/sod_policy.py`](../../src/activesec/core/sod_policy.py) (`sha256:caf6455ac93e`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_sod_policy.py`](../../tests/security/test_sec_sod_policy.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
-| **Adversarial Security Verification** | **VERIFIED (PASS)** (4 test vectors) |
+| **Adversarial Security Verification** | **VERIFIED (PASS)** (5 test vectors) |
 
 ---
 
@@ -43,6 +43,7 @@ Enforces compositional Information-Flow Control (IFC) and Separation of Duties (
 | `test_sec_compositional_sod_blocks_cross_agent_untrusted_shell_laundering` | [Vector F.2 & F.3: Cross-Agent Untrusted Injection Laundering] Agent A reads untrusted external payload and writes to workspace; Agent B reads it and is blocked from arbitrary shell:exec. | **PASS** |
 | `test_sec_derived_taint_and_explicit_declassification_preserve_swe_workflows` | [Vector F.2 & F.3: DERIVED Taint SWE Usability & Ring-1 Declassification] Verifies that DERIVED taint permits workspace code edits and isolated pytest runs, and Ring-1 declassification (SANITIZED) permits safe handoff. | **PASS** |
 | `test_sec_product_lattice_sanitization_preserves_sensitivity_while_redaction_clears_it` | [Vector D.2 & F.2: 2D Product Lattice L_trust x L_sens] Structural sanitization lowers tau to SANITIZED without clearing sigma=SENSITIVE; (UNTRUSTED, SENSITIVE) blocks writes. | **PASS** |
+| `test_sec_trajectory_regime_ablation_conseca_vs_product_ledger` | [Vector F.2 & F.3: Multi-Step Trajectory Ablation] Verifies Oracle Stateless Task Policy vs Coarse Boolean Taint vs Ring-0 Product Lattice + WorkspaceProvenanceLedger across 12 kill-chain and 12 benign SWE trajectories. | **PASS** |
 
 ---
 

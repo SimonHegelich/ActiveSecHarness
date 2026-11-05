@@ -22,7 +22,7 @@ This ledger is automatically compiled and verified by `WikiManager` ([`src/activ
 | **[`network_guard`](components/network_guard.md)** | Ring 0 | `C.1`, `C.2`, `C.3` | `CLEAN` | **VERIFIED** (5/5 passed) | `f8438b11eb` |
 | **[`sandbox_guard`](components/sandbox_guard.md)** | Ring 0 | `A.1`, `A.2`, `E.1`, `E.2`, `E.3` | `CLEAN` | **VERIFIED** (4/4 passed) | `3a282d50ee` |
 | **[`security_kernel`](components/security_kernel.md)** | Ring 0 | `A.1`, `A.3`, `A.4`, `B.1`, `B.2`, `B.3`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.1`, `F.1`, `F.2`, `F.3` | `CLEAN` | **VERIFIED** (3/3 passed) | `c9440cdd45` |
-| **[`sod_policy`](components/sod_policy.md)** | Ring 0 | `C.2`, `D.2`, `F.2`, `F.3` | `CLEAN` | **VERIFIED** (4/4 passed) | `caf6455ac9` |
+| **[`sod_policy`](components/sod_policy.md)** | Ring 0 | `C.2`, `D.2`, `F.2`, `F.3` | `CLEAN` | **VERIFIED** (5/5 passed) | `caf6455ac9` |
 | **[`test_synthesizer`](components/test_synthesizer.md)** | Ring 2 | `A.1`, `B.2`, `F.1`, `F.3` | `CLEAN` | **VERIFIED** (2/2 passed) | `0d6674a774` |
 | **[`tool_registry`](components/tool_registry.md)** | Ring 0 | `A.1`, `A.3`, `C.2`, `F.2`, `F.3` | `CLEAN` | **VERIFIED** (5/5 passed) | `ecc138758d` |
 | **[`user_wiki_manager`](components/user_wiki_manager.md)** | Ring 1 | `F.1`, `D.2`, `B.4`, `A.3` | `CLEAN` | **VERIFIED** (3/3 passed) | `0cfef121c6` |
@@ -33,13 +33,13 @@ This ledger is automatically compiled and verified by `WikiManager` ([`src/activ
 ## Summary Metrics
 
 - **Registered Security Components:** 19
-- **Dedicated Adversarial Test Vectors Executed:** 77
+- **Dedicated Adversarial Test Vectors Executed:** 78
 - **Overall Posture:** ALL COMPONENTS VERIFIED
 
 ---
 
 ## Latest Runtime Security Telemetry (`agent_loop:telemetry-agent`)
 
-- **Audit Chain Verification:** `VERIFIED` (Head SHA-256: `4acc3bb90ae8ac53`)
+- **Audit Chain Verification:** `VERIFIED` (Head SHA-256: `554ff96bcbc07d12`)
 - **Total Mediated Events:** 1 (Allowed: 1, Blocked: 0, Canary Tripwires: 0)
 - **Triggered Threat Vectors:** `NONE`
