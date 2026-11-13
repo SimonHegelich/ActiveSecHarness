@@ -12,10 +12,10 @@
 | **Title** | Ring-0 TLS 1.3 Transport & Anti-SSRF Network Guard |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `C.1`, `C.2`, `C.3` |
-| **Source File** | [`src/activesec/guards/network_guard.py`](../../src/activesec/guards/network_guard.py) (`sha256:f8438b11eb30`) |
+| **Source File** | [`src/activesec/guards/network_guard.py`](../../src/activesec/guards/network_guard.py) (`sha256:06121f27f227`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_network_guard.py`](../../tests/security/test_sec_network_guard.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
-| **Adversarial Security Verification** | **VERIFIED (PASS)** (5 test vectors) |
+| **Adversarial Security Verification** | **VERIFIED (PASS)** (6 test vectors) |
 
 ---
 
@@ -29,8 +29,8 @@ Enforces HTTPS with TLS 1.3, full certificate chain & hostname verification, dom
 
 - Rejects cleartext http://, ftp://, ws://, file://, and gopher:// schemes.
 - Constructs ssl.SSLContext with minimum_version = ssl.TLSVersion.TLSv1_3, verify_mode = ssl.CERT_REQUIRED, and check_hostname = True.
-- Resolves DNS once and validates every returned IP against loopback, link-local (169.254.0.0/16), RFC1918 private, multicast, and unspecified ranges unless explicitly covered by a Pentest lab CIDR.
-- Rejects embedded URL credentials (user:pass@host) and insecure CLI flags (-k, --insecure).
+- Resolves DNS once and validates every returned IP against loopback, link-local (169.254.0.0/16), RFC1918 private, CGNAT shared address space (100.64.0.0/10), multicast, and unspecified ranges unless explicitly covered by a Pentest lab CIDR.
+- Rejects embedded URL credentials (user:pass@host). Insecure CLI flags (-k, --insecure) are flagged by CommandDeobfuscator, not by this guard.
 
 ---
 
@@ -43,6 +43,7 @@ Enforces HTTPS with TLS 1.3, full certificate chain & hostname verification, dom
 | `test_sec_scoped_pentest_lab_cidr_permitted_only_within_scope` | [Vector C.2: Scoped Pentest Lab] Allows isolated lab subnet 10.99.42.0/24 while blocking other private IPs. | **PASS** |
 | `test_sec_hardened_tls_context_enforces_tls13` | [Vector C.1: TLS Hardening] Ensures SSLContext requires TLS 1.3 and strict certificate verification. | **PASS** |
 | `test_sec_socket_level_ip_pinning_defeats_post_check_dns_rebinding` | [Vector C.3: DNS Rebinding TOCTOU Defense] PinnedHTTPSConnection dials the pre-validated IP while preserving TLS SNI hostname. | **PASS** |
+| `test_sec_cgnat_shared_address_space_blocked` | [Vector C.2: SSRF / Internal Network] RFC 6598 carrier-grade NAT addresses (100.64.0.0/10) are not public and are refused. | **PASS** |
 
 ---
 

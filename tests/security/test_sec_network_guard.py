@@ -111,3 +111,16 @@ def test_sec_socket_level_ip_pinning_defeats_post_check_dns_rebinding(monkeypatc
     assert dialed_targets == [("93.184.216.34", 8443)]
     assert sni_hosts == ["api.example.com"]
 
+
+
+@pytest.mark.security
+@pytest.mark.parametrize("cgnat_ip", ["100.64.0.1", "100.100.100.200", "100.127.255.254"])
+def test_sec_cgnat_shared_address_space_blocked(cgnat_ip: str) -> None:
+    """[Vector C.2: SSRF / Internal Network] RFC 6598 carrier-grade NAT addresses (100.64.0.0/10) are not public and are refused."""
+    guard = NetworkGuard(dns_resolver=lambda _host, _port: [cgnat_ip])
+    with pytest.raises(NetworkSecurityError) as exc_info:
+        guard.validate_url_target("https://service.example/")
+    assert exc_info.value.vector_id == "C.2"
+    # Neighbouring public addresses are still accepted.
+    public_guard = NetworkGuard(dns_resolver=lambda _host, _port: ["100.63.255.254"])
+    assert public_guard.validate_url_target("https://service.example/").pinned_ips == ("100.63.255.254",)
