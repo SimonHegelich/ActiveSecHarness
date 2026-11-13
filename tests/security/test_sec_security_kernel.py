@@ -169,3 +169,146 @@ def test_sec_kernel_enforces_dlp_and_malware_guards_on_fs_read_write(tmp_path: P
             agent_id="agent-fs",
         )
     assert not os.path.exists(secret_target)
+
+
+def _kernel_with_token(ws: Path, *, tools: frozenset[str], binaries: frozenset[str] = frozenset(), destinations: frozenset[str] = frozenset(), **kernel_kwargs: object):
+    engine = CapabilityEngine()
+    audit_log = HashChainedAuditLog()
+    kernel = SecurityKernel(workspace_dir=str(ws), capability_engine=engine, audit_log=audit_log, **kernel_kwargs)
+    token = engine.issue_root_token(
+        subject_agent_id="agent-alpha",
+        task_purpose="Regression test",
+        caveat=CapabilityCaveat(
+            allowed_tools=tools,
+            path_prefixes=(str(ws),),
+            allowed_binaries=binaries,
+            network_destinations=destinations,
+            max_calls=20,
+            expires_at_unix=time.time() + 300.0,
+        ),
+    )
+    return kernel, token, audit_log
+
+
+@pytest.mark.security
+def test_sec_kernel_checks_the_executed_binary_not_a_declared_one(tmp_path: Path) -> None:
+    """[Vector A.1: LotL Binary Allowlist] A declared binary_name cannot make the token accept a different executable."""
+    from activesec.guards.sandbox_guard import SandboxGuard, SandboxPolicy
+
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "README.md").write_text("# demo\n", encoding="utf-8")
+    kernel, token, _ = _kernel_with_token(
+        ws,
+        tools=frozenset({"shell:exec"}),
+        binaries=frozenset({"echo"}),
+        sandbox_guard=SandboxGuard(SandboxPolicy(allowed_binaries=frozenset({"echo", "cat"}))),
+    )
+    # The token allows only `echo`. Declaring binary_name="echo" for a `cat` command must not pass.
+    with pytest.raises(CapabilityViolationError) as exc_info:
+        kernel.execute_tool_call(
+            ToolCallRequest(tool_name="shell:exec", raw_command="cat README.md", binary_name="echo"),
+            token=token,
+            agent_id="agent-alpha",
+        )
+    assert "does not match" in exc_info.value.message
+    # Without the declared field the executed binary is checked against the token as before.
+    with pytest.raises(CapabilityViolationError):
+        kernel.execute_tool_call(
+            ToolCallRequest(tool_name="shell:exec", raw_command="cat README.md"),
+            token=token,
+            agent_id="agent-alpha",
+        )
+
+
+@pytest.mark.security
+def test_sec_kernel_checks_the_url_host_not_a_declared_destination(tmp_path: Path) -> None:
+    """[Vector C.2: Network Destination Scope] A declared network_destination cannot make the token accept another URL host."""
+    from activesec.guards.network_guard import NetworkGuard
+
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    kernel, token, _ = _kernel_with_token(
+        ws,
+        tools=frozenset({"net:https"}),
+        destinations=frozenset({"pypi.org"}),
+        network_guard=NetworkGuard(dns_resolver=lambda _host, _port: ["93.184.216.34"]),
+    )
+    with pytest.raises(CapabilityViolationError) as exc_info:
+        kernel.execute_tool_call(
+            ToolCallRequest(
+                tool_name="net:https",
+                network_destination="pypi.org",
+                arguments={"url": "https://example.org/collect"},
+            ),
+            token=token,
+            agent_id="agent-alpha",
+        )
+    assert "does not match the URL host" in exc_info.value.message
+    # The URL host itself is what the token is checked against.
+    with pytest.raises(CapabilityViolationError):
+        kernel.execute_tool_call(
+            ToolCallRequest(tool_name="net:https", arguments={"url": "https://example.org/collect"}),
+            token=token,
+            agent_id="agent-alpha",
+        )
+    result = kernel.execute_tool_call(
+        ToolCallRequest(tool_name="net:https", arguments={"url": "https://pypi.org/simple/"}),
+        token=token,
+        agent_id="agent-alpha",
+    )
+    assert "pypi.org" in result.output
+
+
+@pytest.mark.security
+def test_sec_kernel_read_is_not_redirected_by_a_link_swapped_after_authorization(tmp_path: Path) -> None:
+    """[Vector E.1: TOCTOU Symlink Swap] A link re-pointed after the token check cannot redirect fs:read outside the workspace."""
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "README.md").write_text("inside the workspace\n", encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("OUTSIDE-THE-WORKSPACE\n", encoding="utf-8")
+    link = ws / "data.txt"
+    os.symlink(str(ws / "README.md"), str(link))
+
+    kernel, token, _ = _kernel_with_token(ws, tools=frozenset({"fs:read"}))
+    real_verify = kernel.provenance_ledger.verify_compositional_action
+
+    def swap_link_then_verify(**kwargs: object) -> object:
+        # What a concurrent process could do between authorization and the actual open.
+        os.unlink(str(link))
+        os.symlink(str(outside), str(link))
+        return real_verify(**kwargs)
+
+    kernel.provenance_ledger.verify_compositional_action = swap_link_then_verify  # type: ignore[method-assign]
+    result = kernel.execute_tool_call(
+        ToolCallRequest(tool_name="fs:read", target_path=str(link)),
+        token=token,
+        agent_id="agent-alpha",
+    )
+    assert "OUTSIDE-THE-WORKSPACE" not in result.output
+    assert "inside the workspace" in result.output
+
+    # Opening a path whose final component is a symbolic link is refused outright.
+    with pytest.raises(CapabilityViolationError):
+        SecurityKernel._open_canonical_fd(str(link), os.O_RDONLY)
+
+
+@pytest.mark.security
+def test_sec_kernel_host_errors_fail_closed_and_are_audited(tmp_path: Path) -> None:
+    """[Vector A.1: Complete Mediation Audit] A host-level error is converted into an audited blocked call, never an unlogged crash."""
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "a_directory").mkdir()
+    kernel, token, audit_log = _kernel_with_token(ws, tools=frozenset({"fs:read", "fs:write"}))
+
+    for request in (
+        ToolCallRequest(tool_name="fs:write", target_path=str(ws / "a_directory"), arguments={"content": "x"}),
+        ToolCallRequest(tool_name="fs:write", target_path=str(ws / "safe.txt") + "\x00.exe", arguments={"content": "x"}),
+    ):
+        entries_before = len(audit_log.entries)
+        with pytest.raises(CapabilityViolationError):
+            kernel.execute_tool_call(request, token=token, agent_id="agent-alpha")
+        assert len(audit_log.entries) == entries_before + 1
+        assert audit_log.entries[-1].event_type == "TOOL_CALL_BLOCKED"
+    assert audit_log.verify_chain(audit_log.entries) is True
