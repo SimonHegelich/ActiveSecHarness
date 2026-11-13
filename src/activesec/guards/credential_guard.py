@@ -140,7 +140,7 @@ class CredentialGuard(SecureComponent):
                 "CSPRNG secret generation, and bidirectional cleartext secret redaction."
             ),
             enforced_invariants=(
-                "Rejects any password shorter than min_length (14), below min_shannon_bits (52.0), or with fewer than 3 character classes.",
+                "Rejects any password shorter than min_length (14), below min_shannon_bits (56.0) or min_bits_per_char (4.0), or with fewer than 3 character classes.",
                 "Reverses Leet-speak substitutions (0->o, 1->i/l, 3->e, 4->a, @->a, $->s) and strips digit/symbol affixes before matching against compromised dictionaries and project context words.",
                 "Rejects keyboard walks (qwerty/qwertz/123456) and repeated character sequences.",
                 "Redacts PEM private keys, API tokens (OpenAI, GitHub, AWS, Slack), and secret assignments into deterministic <REDACTED:TYPE:HASH8> placeholders.",

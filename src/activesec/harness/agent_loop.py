@@ -4,8 +4,10 @@ Inspired by mini-swe-agent, this module keeps the agent loop small, transparent,
 confined to Ring 2:
 1. Tracks conversation history (`messages`), monotonic `context_tainted` state, `active_token`,
    and `step_count` bounded by `max_steps`.
-2. Marks `context_tainted = True` permanently for the session whenever untrusted external data
-   (`source_trust="UNTRUSTED"`) is ingested into the agent's context window.
+2. Marks `context_tainted = True` permanently for the session whenever a message is ingested with
+   `source_trust != "TRUSTED"`. The loop itself ingests the task with the trust level its caller
+   passes and feeds every tool result back as `"TRUSTED"`: the trust of file content read through
+   tools is tracked by the SecurityKernel's `WorkspaceProvenanceLedger`, not by this session flag.
 3. Routes all LLM inference through `ModelGateway` and all tool calls exclusively through
    the Ring-0 `SecurityKernel`.
 """
@@ -163,7 +165,7 @@ class AgentLoop(SecureComponent):
             ),
             enforced_invariants=(
                 "Has zero direct filesystem, subprocess, or socket execution primitives; all tool calls pass through SecurityKernel.execute_tool_call().",
-                "Monotonically latches session.context_tainted = True whenever source_trust != 'TRUSTED' data is ingested.",
+                "Monotonically latches session.context_tainted = True whenever a message is ingested with source_trust != 'TRUSTED'. Tool results are ingested as 'TRUSTED'; taint from file content is tracked by the SecurityKernel's WorkspaceProvenanceLedger.",
                 "Propagates context_tainted and active_token to both ModelGateway.chat() and SecurityKernel.execute_tool_call().",
                 "Enforces a hard per-session step limit (max_steps) and immediately halts on CanaryTripwireError.",
             ),

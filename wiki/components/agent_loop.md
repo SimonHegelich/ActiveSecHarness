@@ -12,7 +12,7 @@
 | **Title** | Ring-2 Taint-Tracking Agent Loop & Kernel-Mediated Executor |
 | **Privilege Ring** | **Ring 2** |
 | **Mitigated Threat Vectors** | `A.1`, `E.2`, `F.2`, `F.3` |
-| **Source File** | [`src/activesec/harness/agent_loop.py`](../../src/activesec/harness/agent_loop.py) (`sha256:8d89c3435dee`) |
+| **Source File** | [`src/activesec/harness/agent_loop.py`](../../src/activesec/harness/agent_loop.py) (`sha256:b424df040e8f`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_agent_loop.py`](../../tests/security/test_sec_agent_loop.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
 | **Adversarial Security Verification** | **VERIFIED (PASS)** (3 test vectors) |
@@ -28,7 +28,7 @@ Implements a minimal, inspectable Ring-2 agent execution loop inspired by mini-s
 ## 3. Enforced Deterministic Security Invariants
 
 - Has zero direct filesystem, subprocess, or socket execution primitives; all tool calls pass through SecurityKernel.execute_tool_call().
-- Monotonically latches session.context_tainted = True whenever source_trust != 'TRUSTED' data is ingested.
+- Monotonically latches session.context_tainted = True whenever a message is ingested with source_trust != 'TRUSTED'. Tool results are ingested as 'TRUSTED'; taint from file content is tracked by the SecurityKernel's WorkspaceProvenanceLedger.
 - Propagates context_tainted and active_token to both ModelGateway.chat() and SecurityKernel.execute_tool_call().
 - Enforces a hard per-session step limit (max_steps) and immediately halts on CanaryTripwireError.
 
