@@ -201,3 +201,18 @@ def test_sec_code_verifier_detects_eval_shell_true_pickle_and_weak_random(tmp_pa
     assert "AST_DYNAMIC_CODE_EXEC" in rules
     assert "AST_SUBPROCESS_SHELL_TRUE" in rules
     assert "AST_WEAK_RANDOM_FOR_SECRET" in rules
+
+
+@pytest.mark.security
+def test_sec_method_named_eval_is_not_reported_as_builtin_eval() -> None:
+    """[Vector A.1: Dynamic Code Execution] model.eval() / df.eval() are method calls; only the builtins eval()/exec() are code execution."""
+    verifier = CodeVerifier()
+
+    def exec_findings(source: str) -> list[str]:
+        return [f.rule_id for f in verifier.analyze_python_source(textwrap.dedent(source)) if f.rule_id == "AST_DYNAMIC_CODE_EXEC"]
+
+    assert exec_findings("def infer(model, x):\n    model.eval()\n    return model(x)\n") == []
+    assert exec_findings("def total(df):\n    return df.eval('a + b')\n") == []
+    assert exec_findings("def calc(expr):\n    return eval(expr)\n") == ["AST_DYNAMIC_CODE_EXEC"]
+    assert exec_findings("import builtins\ndef calc(expr):\n    return builtins.eval(expr)\n") == ["AST_DYNAMIC_CODE_EXEC"]
+    assert exec_findings("def run(code):\n    exec(code)\n") == ["AST_DYNAMIC_CODE_EXEC"]

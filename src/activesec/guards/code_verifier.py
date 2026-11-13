@@ -162,7 +162,7 @@ class CodeVerifier(SecureComponent):
                 "test-runner sub-agent inside SandboxGuard."
             ),
             enforced_invariants=(
-                "Tier 1 Universal: Always blocks eval(), exec(), os.system(), subprocess(..., shell=True), pickle/marshal, and Trojan Source Unicode.",
+                "Tier 1 Universal: Blocks direct calls to the builtins eval()/exec(), os.system()/os.popen(), subprocess(..., shell=True), imports of pickle/marshal, and Trojan Source Unicode. Calls reached through an alias (e = eval; from os import system as s) are not tracked.",
                 "Tier 2 Contextual: Blocks unvalidated extractall(), but permits extractall() when AST dataflow proves prior infolist()/namelist() path+quota validation, self-created local archives, or a Ring-1 ContextWaiver.",
                 "Tier 3 Task-Scoped: Executes synthesized regression tests strictly against their target file unless explicitly promoted to the domain catalog.",
                 "Isolates all dynamic test execution into a dedicated SoD sub-agent holding an attenuated shell:exec token with zero network access.",
@@ -234,6 +234,22 @@ class CodeVerifier(SecureComponent):
             )
         if real_test not in self._promoted_catalog_tests:
             self._promoted_catalog_tests.append(real_test)
+
+    @staticmethod
+    def _is_builtin_code_exec_call(func: ast.expr) -> bool:
+        """Return True for the builtins ``eval()`` / ``exec()``, not for a method that shares the name.
+
+        ``model.eval()`` (PyTorch inference mode) and ``df.eval(...)`` (pandas) are ordinary method
+        calls and must not be reported as arbitrary code execution. Only a bare ``eval(...)`` /
+        ``exec(...)`` or an explicit ``builtins.eval(...)`` is the code-execution primitive.
+        """
+        if isinstance(func, ast.Name):
+            return True
+        return (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id in ("builtins", "__builtins__")
+        )
 
     @staticmethod
     def _scope_prevalidates_archive_or_is_self_created(scope_node: ast.AST) -> Tuple[bool, bool]:
@@ -436,7 +452,7 @@ class CodeVerifier(SecureComponent):
                                 tier=VerificationTier.TIER2_CONTEXTUAL,
                             )
                         )
-                elif func_name in ("eval", "exec"):
+                elif func_name in ("eval", "exec") and self._is_builtin_code_exec_call(node.func):
                     findings.append(
                         CodeVulnerabilityFinding(
                             rule_id="AST_DYNAMIC_CODE_EXEC",
