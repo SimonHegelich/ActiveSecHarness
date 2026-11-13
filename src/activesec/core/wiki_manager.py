@@ -49,6 +49,9 @@ class ComponentVerificationResult:
     ast_findings: Tuple[str, ...]
     test_cases: Tuple[TestCaseInfo, ...]
     all_tests_passed: bool
+    # False when the sync only discovered the test functions without running them (runtime syncs).
+    # A status of "VERIFIED" / "passed" may only be reported when this is True.
+    tests_executed: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +172,7 @@ class WikiManager(SecureComponent):
                 "Confines all wiki file writes strictly within the canonical repository root (os.path.realpath) and rejects symlinked wiki targets.",
                 "Verifies HashChainedAuditLog cryptographic chain integrity before recording any runtime security telemetry snapshot into the Wiki.",
                 "Detects unauthorized component source modifications by comparing live SHA-256 digests against pinned ledger fingerprints.",
+                "Reports a component as VERIFIED, with its real pass count, only when its tests were executed in the same sync; runtime syncs that only discover the tests record NOT RUN.",
             ),
             residual_risks=(
                 "Static AST analysis inspects syntactic call nodes within registered Python files; dynamic runtime enforcement is paired with SandboxGuard and CertifiedToolRegistry.",
@@ -343,8 +347,14 @@ class WikiManager(SecureComponent):
 
         cases: List[TestCaseInfo] = []
         for tc in discovered:
-            failed = f"::{tc.name} FAILED" in stdout or (f"::{tc.name}[" in stdout and "FAILED" in stdout)
-            passed = not failed and overall_passed
+            # A test counts as passed only on positive evidence in the verbose pytest output:
+            # at least one PASSED line for it and no FAILED / ERROR line.
+            name_lines = [
+                line for line in stdout.splitlines()
+                if f"::{tc.name} " in line or f"::{tc.name}[" in line
+            ]
+            failed = any(" FAILED" in line or " ERROR" in line for line in name_lines)
+            passed = (not failed) and any(" PASSED" in line for line in name_lines)
             cases.append(TestCaseInfo(name=tc.name, docstring=tc.docstring, passed=passed))
 
         return (overall_passed and len(cases) > 0, tuple(cases))
@@ -391,7 +401,10 @@ class WikiManager(SecureComponent):
     def render_component_wiki_page(result: ComponentVerificationResult) -> str:
         """Render the Karpathy Wiki markdown page for a single SecureComponent."""
         a = result.assessment
-        status_badge = "VERIFIED (PASS)" if (result.all_tests_passed and result.ast_safe) else "FAILED / UNVERIFIED"
+        if not result.tests_executed:
+            status_badge = "NOT RUN IN THIS SYNC (tests discovered, not executed)"
+        else:
+            status_badge = "VERIFIED (PASS)" if (result.all_tests_passed and result.ast_safe) else "FAILED / UNVERIFIED"
         ast_badge = "CLEAN (Zero Forbidden Primitives)" if result.ast_safe else "VIOLATION DETECTED"
 
         invariants_md = "\n".join(f"- {inv}" for inv in a.enforced_invariants)
@@ -400,7 +413,10 @@ class WikiManager(SecureComponent):
 
         test_rows: List[str] = []
         for tc in result.test_cases:
-            tc_status = "PASS" if tc.passed else "FAIL"
+            if not result.tests_executed:
+                tc_status = "NOT RUN"
+            else:
+                tc_status = "PASS" if tc.passed else "FAIL"
             test_rows.append(f"| `{tc.name}` | {tc.docstring} | **{tc_status}** |")
         tests_table = "\n".join(test_rows)
 
@@ -459,15 +475,29 @@ class WikiManager(SecureComponent):
         """Render `wiki/SECURITY_LEDGER.md` summarizing all components and optional runtime telemetry."""
         rows: List[str] = []
         total_tests = 0
+        executed_tests = 0
         for r in results:
             a = r.assessment
             total_tests += len(r.test_cases)
-            status = "VERIFIED" if (r.all_tests_passed and r.ast_safe) else "FAILED"
             ast_status = "CLEAN" if r.ast_safe else "UNSAFE"
             vectors = ", ".join(f"`{v}`" for v in a.threat_vectors)
+            if r.tests_executed:
+                executed_tests += len(r.test_cases)
+                passed_count = sum(1 for tc in r.test_cases if tc.passed)
+                status = "VERIFIED" if (r.all_tests_passed and r.ast_safe) else "FAILED"
+                test_cell = f"**{status}** ({passed_count}/{len(r.test_cases)} passed)"
+            else:
+                test_cell = f"**NOT RUN** ({len(r.test_cases)} tests discovered, not executed in this sync)"
             rows.append(
-                f"| **[`{a.component_id}`](components/{a.component_id}.md)** | Ring {a.ring_level} | {vectors} | `{ast_status}` | **{status}** ({len(r.test_cases)}/{len(r.test_cases)} passed) | `{r.source_sha256[:10]}` |"
+                f"| **[`{a.component_id}`](components/{a.component_id}.md)** | Ring {a.ring_level} | {vectors} | `{ast_status}` | {test_cell} | `{r.source_sha256[:10]}` |"
             )
+        all_executed = all(r.tests_executed for r in results)
+        if not all_executed:
+            overall_posture = "TESTS NOT RUN IN THIS SYNC (static audit and source hashes only)"
+        elif all(r.all_tests_passed and r.ast_safe for r in results):
+            overall_posture = "ALL COMPONENTS VERIFIED"
+        else:
+            overall_posture = "ATTENTION REQUIRED"
 
         table_md = "\n".join(rows)
         telemetry_section = ""
@@ -504,8 +534,8 @@ This ledger is automatically compiled and verified by `WikiManager` ([`src/activ
 ## Summary Metrics
 
 - **Registered Security Components:** {len(results)}
-- **Dedicated Adversarial Test Vectors Executed:** {total_tests}
-- **Overall Posture:** {"ALL COMPONENTS VERIFIED" if all(r.all_tests_passed and r.ast_safe for r in results) else "ATTENTION REQUIRED"}
+- **Dedicated Adversarial Test Vectors Executed:** {executed_tests} (of {total_tests} discovered)
+- **Overall Posture:** {overall_posture}
 {telemetry_section}"""
 
     def update_wiki_log(
@@ -518,12 +548,19 @@ This ledger is automatically compiled and verified by `WikiManager` ([`src/activ
         log_path = self._wiki_dir / "log.md"
         today = datetime.date.today().isoformat()
         all_ok = all(r.all_tests_passed and r.ast_safe for r in results)
+        all_executed = all(r.tests_executed for r in results)
         comp_list = ", ".join(f"`{r.assessment.component_id}`" for r in results)
         total_vectors = sum(len(r.test_cases) for r in results)
 
+        if all_executed:
+            title = f"Verified {len(results)} Components ({total_vectors} Adversarial Test Vectors)"
+            status_text = "ALL PASSED & AST CLEAN" if all_ok else "FAILURE DETECTED"
+        else:
+            title = f"Static audit of {len(results)} Components ({total_vectors} test vectors discovered, not executed)"
+            status_text = "AST CLEAN, TESTS NOT RUN" if all(r.ast_safe for r in results) else "FAILURE DETECTED"
         entry = (
-            f"## [{today}] wiki_sync | Verified {len(results)} Components ({total_vectors} Adversarial Test Vectors)\n\n"
-            f"- **Status:** {'ALL PASSED & AST CLEAN' if all_ok else 'FAILURE DETECTED'}\n"
+            f"## [{today}] wiki_sync | {title}\n\n"
+            f"- **Status:** {status_text}\n"
             f"- **Components Audited:** {comp_list}\n"
             f"- **Artifacts Updated:** `wiki/SECURITY_LEDGER.md`, `wiki/components/*.md`\n"
         )
@@ -617,9 +654,16 @@ This ledger is automatically compiled and verified by `WikiManager` ([`src/activ
                 ast_findings=ast_findings,
                 test_cases=test_cases,
                 all_tests_passed=tests_passed,
+                tests_executed=execute_pytest,
             )
             results.append(res)
 
+        # Pages are written only after every component's tests have finished: a component test may
+        # itself run a runtime (non-executing) sync, which must not overwrite pages written earlier.
+        for res in results:
+            comp_id = res.assessment.component_id
+            ast_safe = res.ast_safe
+            tests_passed = res.all_tests_passed
             page_path = comp_dir / f"{comp_id}.md"
             self._safe_write_wiki_file(page_path, self.render_component_wiki_page(res))
             if not quiet:
