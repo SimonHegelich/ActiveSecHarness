@@ -12,16 +12,16 @@
 | **Title** | Ring-0 Namespace Sandbox, Clean-Room Environment & Resource Quota Guard |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `A.1`, `A.2`, `E.1`, `E.2`, `E.3` |
-| **Source File** | [`src/activesec/guards/sandbox_guard.py`](../../src/activesec/guards/sandbox_guard.py) (`sha256:3a282d50ee0b`) |
+| **Source File** | [`src/activesec/guards/sandbox_guard.py`](../../src/activesec/guards/sandbox_guard.py) (`sha256:4a6f84934302`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_sandbox_guard.py`](../../tests/security/test_sec_sandbox_guard.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
-| **Adversarial Security Verification** | **VERIFIED (PASS)** (4 test vectors) |
+| **Adversarial Security Verification** | **VERIFIED (PASS)** (5 test vectors) |
 
 ---
 
 ## 2. Architectural Summary
 
-Isolates all agent subprocess executions using clean-room environment scrubbing, binary allowlisting, bubblewrap (bwrap) Linux namespaces (--unshare-all, --die-with-parent), unmounted host home directories, and OS resource limits (RLIMIT_NPROC, RLIMIT_FSIZE) against fork bombs and container escapes.
+Isolates all agent subprocess executions using clean-room environment scrubbing, binary allowlisting, bubblewrap (bwrap) Linux namespaces (--unshare-all, --die-with-parent), unmounted host home directories, and OS resource limits (RLIMIT_FSIZE, RLIMIT_AS, RLIMIT_CPU; RLIMIT_NPROC only when max_processes >= 512) against resource exhaustion and container escapes.
 
 ---
 
@@ -32,6 +32,7 @@ Isolates all agent subprocess executions using clean-room environment scrubbing,
 - Blocks mounting of sensitive host paths (/var/run/docker.sock, /etc/shadow, ~/.ssh) into the sandbox.
 - Builds bubblewrap command lines with --unshare-all, --die-with-parent, --new-session, read-only /usr /bin /lib, and isolated --tmpfs /tmp.
 - Enforces close_fds=True and hard wall-clock timeouts on every subprocess.
+- Refuses per-binary forbidden flags, including unambiguous GNU long-option abbreviations (e.g. --checkpoint-act for --checkpoint-action).
 
 ---
 
@@ -43,6 +44,7 @@ Isolates all agent subprocess executions using clean-room environment scrubbing,
 | `test_sec_forbidden_docker_socket_and_ssh_mounts_blocked` | [Vector E.1: Container/Sandbox Escape] Blocks mounting /var/run/docker.sock, /etc/shadow, or ~/.ssh. | **PASS** |
 | `test_sec_unauthorized_lotl_binary_and_timeout_enforced` | [Vector A.1 & E.2: LotL Binary & Resource Exhaustion] Blocks unapproved binaries and terminates hung processes. | **PASS** |
 | `test_sec_gtfobins_disallowed_binary_flags_blocked` | [Vector E.3: Disallowed Binary Flags] Blocks GTFOBins flag escapes on allowlisted binaries. | **PASS** |
+| `test_sec_abbreviated_gnu_long_options_blocked` | [Vector E.3: Disallowed Binary Flags] An unambiguous abbreviation of a forbidden long option is refused like the full flag. | **PASS** |
 
 ---
 
