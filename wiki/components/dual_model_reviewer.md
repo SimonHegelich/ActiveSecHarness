@@ -12,10 +12,10 @@
 | **Title** | Ring-2 Dual-Model Security Reviewer & Self-Healing Repair Orchestrator |
 | **Privilege Ring** | **Ring 2** |
 | **Mitigated Threat Vectors** | `A.1`, `B.1`, `B.2`, `D.1`, `F.1`, `F.3` |
-| **Source File** | [`src/activesec/harness/dual_model_reviewer.py`](../../src/activesec/harness/dual_model_reviewer.py) (`sha256:35f168a38d01`) |
+| **Source File** | [`src/activesec/harness/dual_model_reviewer.py`](../../src/activesec/harness/dual_model_reviewer.py) (`sha256:559703ca9054`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_dual_model_reviewer.py`](../../tests/security/test_sec_dual_model_reviewer.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
-| **Adversarial Security Verification** | **VERIFIED (PASS)** (2 test vectors) |
+| **Adversarial Security Verification** | **VERIFIED (PASS)** (4 test vectors) |
 
 ---
 
@@ -27,7 +27,7 @@ Combines deterministic LLM-independent CodeVerifier checks (Stage A) with an ind
 
 ## 3. Enforced Deterministic Security Invariants
 
-- Execution Gate: approved_for_execution is strictly False whenever Stage-A deterministic checks OR Stage-B reviewer model report a vulnerability.
+- Execution Gate: approved_for_execution is strictly False whenever Stage-A deterministic checks OR Stage-B reviewer model report a vulnerability. If Stage B is unreachable or returns no explicit verdict, Stage A alone decides and the verdict says so.
 - Context Isolation: The Stage-B reviewer model receives only the target source file and deterministic findings in a fresh context window.
 - Model Escalation Recommendation: Automatically recommends a stronger model (e.g. openrouter/qwen/qwen3-coder) when a small local model produces vulnerable code.
 - Updates UserWikiManager (`wiki_user/`) with plain-language explanations and before/after code comparisons.
@@ -40,6 +40,8 @@ Combines deterministic LLM-independent CodeVerifier checks (Stage A) with an ind
 | :--- | :--- | :--- |
 | `test_sec_dual_model_reviewer_blocks_unsafe_code_and_self_heals` | [Vector B.1, B.2 & F.1: Dual-Model Review & Self-Healing Loop] Blocks unsafe extractall(), explains in plain language, escalates to OpenRouter fixer, and updates wiki_user/. | **PASS** |
 | `test_sec_dual_model_reviewer_offline_ollama_fallback_and_reference_remediation` | [Vector B.1, B.2 & F.1: Air-Gapped Local Ollama Repair Fallback] When OpenRouter is unavailable and weak local model fails to fix extractall(), certified reference remediation heals the file and updates wiki_user/. | **PASS** |
+| `test_sec_reviewer_does_not_claim_a_stage_b_review_that_did_not_happen` | [Vector F.1: Review Integrity] Without an explicit Stage-B verdict the result says the approval rests on Stage A only. | **PASS** |
+| `test_sec_repair_loop_never_persists_a_secret_from_the_model` | [Vector D.2: Secret DLP] A model-generated repair that embeds a cleartext secret is not written to disk. | **PASS** |
 
 ---
 

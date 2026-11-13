@@ -31,6 +31,7 @@ from activesec.core.component import ComponentSecurityAssessment, SecureComponen
 from activesec.core.exceptions import ActiveSecError, CodeSecurityVerificationError
 from activesec.core.user_wiki_manager import UserWikiManager
 from activesec.guards.code_verifier import CodeVerifier, DeterministicVerificationReport
+from activesec.guards.credential_guard import CredentialGuard
 from activesec.harness.model_gateway import ChatMessage, ModelGateway, ModelResponse, ModelRole
 from activesec.harness.test_synthesizer import SecurityTestSynthesizer, SynthesizedSecurityTest
 
@@ -171,6 +172,9 @@ class DualModelReviewer(SecureComponent):
     ) -> None:
         self._gateway: ModelGateway = gateway
         self._code_verifier: CodeVerifier = code_verifier or CodeVerifier()
+        # Repaired code is written to disk by this component, not through SecurityKernel fs:write.
+        # The kernel's content rule for writes (no cleartext secrets) is therefore applied here.
+        self._credential_guard: CredentialGuard = CredentialGuard()
         self._user_wiki_manager: Optional[UserWikiManager] = user_wiki_manager
         self._test_synthesizer: SecurityTestSynthesizer = test_synthesizer or SecurityTestSynthesizer(
             gateway=self._gateway,
@@ -204,7 +208,7 @@ class DualModelReviewer(SecureComponent):
                 "loop, and records lessons into the User Security Academy Wiki (`wiki_user/`)."
             ),
             enforced_invariants=(
-                "Execution Gate: approved_for_execution is strictly False whenever Stage-A deterministic checks OR Stage-B reviewer model report a vulnerability.",
+                "Execution Gate: approved_for_execution is strictly False whenever Stage-A deterministic checks OR Stage-B reviewer model report a vulnerability. If Stage B is unreachable or returns no explicit verdict, Stage A alone decides and the verdict says so.",
                 "Context Isolation: The Stage-B reviewer model receives only the target source file and deterministic findings in a fresh context window.",
                 "Model Escalation Recommendation: Automatically recommends a stronger model (e.g. openrouter/qwen/qwen3-coder) when a small local model produces vulnerable code.",
                 "Updates UserWikiManager (`wiki_user/`) with plain-language explanations and before/after code comparisons.",
@@ -282,6 +286,7 @@ class DualModelReviewer(SecureComponent):
         )
 
         llm_approved = True
+        stage_b_returned_verdict = False
         llm_explanation = ""
         llm_how_to_fix = ""
         llm_recommended_model = ""
@@ -300,7 +305,9 @@ class DualModelReviewer(SecureComponent):
             if raw_content.startswith("{"):
                 parsed = json.loads(raw_content)
                 if isinstance(parsed, dict):
-                    llm_approved = bool(parsed.get("approved", True))
+                    if "approved" in parsed:
+                        llm_approved = bool(parsed["approved"])
+                        stage_b_returned_verdict = True
                     llm_explanation = str(parsed.get("plain_explanation", "")).strip()
                     llm_how_to_fix = str(parsed.get("how_to_fix", "")).strip()
                     llm_recommended_model = str(parsed.get("recommended_model", "")).strip()
@@ -331,7 +338,7 @@ class DualModelReviewer(SecureComponent):
                 f"[EXECUTION BLOCKED BY SECURITY GATE] '{os.path.basename(real_file)}' contains security "
                 f"vulnerabilities and WILL NOT BE EXECUTED."
             )
-        else:
+        elif stage_b_returned_verdict:
             plain_explanation = (
                 llm_explanation
                 or "Both deterministic sandbox tests (Stage A) and the independent security reviewer model (Stage B) verified that this program is safe."
@@ -341,6 +348,19 @@ class DualModelReviewer(SecureComponent):
             banner = (
                 f"[SECURITY VERIFIED] '{os.path.basename(real_file)}' passed Stage-A deterministic sandbox "
                 f"tests and Stage-B review ({rev_provider}/{rev_model}). Execution permitted."
+            )
+        else:
+            # The second model was unreachable or returned no explicit verdict. Stage A still decides,
+            # but the result must not claim that an independent review took place.
+            plain_explanation = (
+                "Deterministic sandbox tests (Stage A) passed. The independent reviewer model (Stage B) "
+                "returned no usable verdict, so this approval rests on Stage A only."
+            )
+            how_to_fix = llm_how_to_fix or "No further changes needed; all Stage-A security invariants hold."
+            recommended_model = None
+            banner = (
+                f"[SECURITY VERIFIED - STAGE A ONLY] '{os.path.basename(real_file)}' passed Stage-A deterministic "
+                f"sandbox tests. Stage-B review ({rev_provider}/{rev_model}) returned no usable verdict. Execution permitted."
             )
 
         return SecurityReviewVerdict(
@@ -495,6 +515,13 @@ class DualModelReviewer(SecureComponent):
                     new_code = None
 
                 if new_code:
+                    try:
+                        self._credential_guard.assert_no_cleartext_secrets(new_code)
+                    except ActiveSecError:
+                        # Never persist a model-generated repair that embeds a cleartext secret.
+                        new_code = None
+
+                if new_code:
                     Path(real_file).write_text(new_code, encoding="utf-8")
                     os.chmod(real_file, 0o600)
 
@@ -618,6 +645,11 @@ class DualModelReviewer(SecureComponent):
                     f"Auto-Repair Loop: Ran {result.iterations_run} repair iteration(s) using "
                     f"{last_rec.fixer_provider}/{last_rec.fixer_model}."
                 )
+                if last_rec.fixer_provider == "ring0-reference":
+                    lines.append(
+                        "Note: the model could not repair the file, so its whole content was replaced by the "
+                        "built-in reference implementation. Any other code that was in the file is no longer there."
+                    )
                 lines.append(final.execution_status_banner)
         else:
             lines.append(final.execution_status_banner)
