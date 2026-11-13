@@ -12,10 +12,10 @@
 | **Title** | Ring-0 Archive Decompression Bomb & Path Traversal Guard |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `B.1`, `B.2` |
-| **Source File** | [`src/activesec/guards/archive_guard.py`](../../src/activesec/guards/archive_guard.py) (`sha256:d9801f8a2703`) |
+| **Source File** | [`src/activesec/guards/archive_guard.py`](../../src/activesec/guards/archive_guard.py) (`sha256:bcabc5927a16`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_archive_guard.py`](../../tests/security/test_sec_archive_guard.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
-| **Adversarial Security Verification** | **VERIFIED (PASS)** (5 test vectors) |
+| **Adversarial Security Verification** | **VERIFIED (PASS)** (6 test vectors) |
 
 ---
 
@@ -43,6 +43,7 @@ Protects the harness against flat and recursive decompression bombs (ZipBombs), 
 | `test_sec_symlink_and_setuid_in_archive_blocked` | [Vector B.2: Symlink & Special File Attack] Rejects symlinks and setuid bits inside archives. | **PASS** |
 | `test_sec_recursive_nested_archive_limit_enforced` | [Vector B.1: Recursive ZipBomb] Blocks nested archives exceeding max_nesting_depth. | **PASS** |
 | `test_sec_archive_atomic_staging_and_symlink_target_rejection` | [Vector B.2: TOCTOU Symlink Target Rejection & Atomic Staging] Rejects symlinked target_dir and leaves zero leftover staging directories after extraction. | **PASS** |
+| `test_sec_rejected_archive_does_not_delete_existing_destination_files` | [Vector B.2: Zip-Slip Rollback] Rejecting an archive removes nothing that was already in the destination directory. | **PASS** |
 
 ---
 

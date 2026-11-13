@@ -251,3 +251,65 @@ def test_sec_dual_model_reviewer_offline_ollama_fallback_and_reference_remediati
     assert loop_res.user_wiki_lesson_path is not None
     assert Path(loop_res.user_wiki_lesson_path).is_file()
 
+
+
+class _ScriptedGateway:
+    """Minimal stand-in for ModelGateway: returns a fixed reviewer answer and a fixed repair answer."""
+
+    def __init__(self, *, review: object, repair: str = "") -> None:
+        self._review = review
+        self._repair = repair
+
+    def chat(self, messages, **_kwargs):  # type: ignore[no-untyped-def]
+        from activesec.harness.model_gateway import ModelResponse
+
+        is_repair = "fs:write" in messages[0].content
+        answer = self._repair if is_repair else self._review
+        if isinstance(answer, Exception):
+            raise answer
+        return ModelResponse(content=str(answer), tool_call=None, model_id="scripted", provider_name="scripted")
+
+
+@pytest.mark.security
+def test_sec_reviewer_does_not_claim_a_stage_b_review_that_did_not_happen(tmp_path: Path) -> None:
+    """[Vector F.1: Review Integrity] Without an explicit Stage-B verdict the result says the approval rests on Stage A only."""
+    from activesec.core.exceptions import ModelSecurityError
+
+    safe_file = tmp_path / "add.py"
+    safe_file.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+
+    unusable_answers: list[object] = [
+        "I think it is probably fine.",
+        json.dumps({"plain_explanation": "looks fine"}),
+        ModelSecurityError("reviewer offline", vector_id="C.1", component_id="model_gateway"),
+    ]
+    for answer in unusable_answers:
+        reviewer = DualModelReviewer(gateway=_ScriptedGateway(review=answer), openrouter_key_available=False)  # type: ignore[arg-type]
+        verdict = reviewer.review_file(str(safe_file), workspace_dir=str(tmp_path))
+        assert verdict.approved_for_execution is True
+        assert "STAGE A ONLY" in verdict.execution_status_banner
+        assert "rests on Stage A only" in verdict.plain_language_explanation
+        assert "Both deterministic" not in verdict.plain_language_explanation
+
+    reviewer = DualModelReviewer(gateway=_ScriptedGateway(review=json.dumps({"approved": True})), openrouter_key_available=False)  # type: ignore[arg-type]
+    verdict = reviewer.review_file(str(safe_file), workspace_dir=str(tmp_path))
+    assert verdict.approved_for_execution is True
+    assert "Stage-B review" in verdict.execution_status_banner and "STAGE A ONLY" not in verdict.execution_status_banner
+
+
+@pytest.mark.security
+def test_sec_repair_loop_never_persists_a_secret_from_the_model(tmp_path: Path) -> None:
+    """[Vector D.2: Secret DLP] A model-generated repair that embeds a cleartext secret is not written to disk."""
+    target = tmp_path / "calc.py"
+    original = "def calc(expr):\n    return eval(expr)\n"
+    target.write_text(original, encoding="utf-8")
+    access_key = "AKI" + "A" + "ABCDEFGHIJKLMNOP"
+    leaking_repair = "```python\nAWS_ACCESS_KEY_ID = '" + access_key + "'\n\ndef calc(expr):\n    return float(expr)\n```"
+
+    reviewer = DualModelReviewer(
+        gateway=_ScriptedGateway(review=json.dumps({"approved": True}), repair=leaking_repair),  # type: ignore[arg-type]
+        openrouter_key_available=False,
+    )
+    result = reviewer.run_verified_coding_loop(str(target), task_description="demo", workspace_dir=str(tmp_path))
+    assert access_key not in target.read_text(encoding="utf-8")
+    assert result.approved_for_execution is False

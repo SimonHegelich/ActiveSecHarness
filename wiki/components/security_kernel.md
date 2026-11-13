@@ -12,10 +12,10 @@
 | **Title** | Ring-0 Security Kernel & Complete Mediation Reference Monitor |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `A.1`, `A.3`, `A.4`, `B.1`, `B.2`, `B.3`, `B.4`, `C.1`, `C.2`, `C.3`, `D.2`, `E.1`, `F.1`, `F.2`, `F.3` |
-| **Source File** | [`src/activesec/core/security_kernel.py`](../../src/activesec/core/security_kernel.py) (`sha256:c9440cdd45b2`) |
+| **Source File** | [`src/activesec/core/security_kernel.py`](../../src/activesec/core/security_kernel.py) (`sha256:8ffe51f71b3a`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_security_kernel.py`](../../tests/security/test_sec_security_kernel.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
-| **Adversarial Security Verification** | **VERIFIED (PASS)** (3 test vectors) |
+| **Adversarial Security Verification** | **VERIFIED (PASS)** (7 test vectors) |
 
 ---
 
@@ -43,6 +43,10 @@ Acts as the non-bypassable Ring-0 reference monitor between the agent loop and h
 | `test_sec_kernel_canary_tripwire_revokes_token_and_logs_alert` | [Vector F.2 & A.1: Canary Tripwire Revocation] Accessing a honeyfile via SecurityKernel revokes the token and logs CANARY_TRIPWIRE_ALERT. | **PASS** |
 | `test_sec_kernel_blocks_obfuscated_and_lotl_shell_commands` | [Vector F.1 & B.4: Deobfuscator Mediation] Blocks Base64-obfuscated and curl|sh commands before SandboxGuard execution. | **PASS** |
 | `test_sec_kernel_enforces_dlp_and_malware_guards_on_fs_read_write` | [Vector D.2 & B.3: File DLP & Malware Mediation] Redacts secrets on fs:read, blocks cleartext secrets on fs:write, and blocks EICAR malware. | **PASS** |
+| `test_sec_kernel_checks_the_executed_binary_not_a_declared_one` | [Vector A.1: LotL Binary Allowlist] A declared binary_name cannot make the token accept a different executable. | **PASS** |
+| `test_sec_kernel_checks_the_url_host_not_a_declared_destination` | [Vector C.2: Network Destination Scope] A declared network_destination cannot make the token accept another URL host. | **PASS** |
+| `test_sec_kernel_read_is_not_redirected_by_a_link_swapped_after_authorization` | [Vector E.1: TOCTOU Symlink Swap] A link re-pointed after the token check cannot redirect fs:read outside the workspace. | **PASS** |
+| `test_sec_kernel_host_errors_fail_closed_and_are_audited` | [Vector A.1: Complete Mediation Audit] A host-level error is converted into an audited blocked call, never an unlogged crash. | **PASS** |
 
 ---
 

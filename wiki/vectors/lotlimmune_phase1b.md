@@ -1,5 +1,9 @@
 # LotLImmune E1 — Comparative Defense Benchmark
 
+> **Note (November 2026).** The numbers and mechanisms on this page predate the fixes described in
+> [`docs/05_audit_fixes_and_corrected_results.md`](../../docs/05_audit_fixes_and_corrected_results.md).
+> That document has the corrected results and says which statements below no longer hold.
+
 Companion empirical suite for the `LotLImmune` paper (papermachineclip).
 
 ## What runs

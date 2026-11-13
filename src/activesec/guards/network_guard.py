@@ -21,6 +21,10 @@ from activesec.core.exceptions import NetworkSecurityError
 
 ResolverFunc = Callable[[str, int], List[str]]
 
+# RFC 6598 carrier-grade NAT shared address space. Python's ipaddress does not report it as private,
+# yet it is not publicly routable (some cloud metadata services live in it).
+CGNAT_SHARED_ADDRESS_SPACE: ipaddress.IPv4Network = ipaddress.ip_network("100.64.0.0/10")
+
 
 @dataclass(frozen=True, slots=True)
 class ValidatedEndpoint:
@@ -122,8 +126,8 @@ class NetworkGuard(SecureComponent):
             enforced_invariants=(
                 "Rejects cleartext http://, ftp://, ws://, file://, and gopher:// schemes.",
                 "Constructs ssl.SSLContext with minimum_version = ssl.TLSVersion.TLSv1_3, verify_mode = ssl.CERT_REQUIRED, and check_hostname = True.",
-                "Resolves DNS once and validates every returned IP against loopback, link-local (169.254.0.0/16), RFC1918 private, multicast, and unspecified ranges unless explicitly covered by a Pentest lab CIDR.",
-                "Rejects embedded URL credentials (user:pass@host) and insecure CLI flags (-k, --insecure).",
+                "Resolves DNS once and validates every returned IP against loopback, link-local (169.254.0.0/16), RFC1918 private, CGNAT shared address space (100.64.0.0/10), multicast, and unspecified ranges unless explicitly covered by a Pentest lab CIDR.",
+                "Rejects embedded URL credentials (user:pass@host). Insecure CLI flags (-k, --insecure) are flagged by CommandDeobfuscator, not by this guard.",
             ),
             residual_risks=(
                 "Application-layer data exfiltration to an explicitly allowlisted public domain (mitigated by pairing with CredentialGuard DLP inspection).",
@@ -260,6 +264,7 @@ class NetworkGuard(SecureComponent):
             or ip_obj.is_multicast
             or ip_obj.is_unspecified
             or ip_obj.is_reserved
+            or (isinstance(ip_obj, ipaddress.IPv4Address) and ip_obj in CGNAT_SHARED_ADDRESS_SPACE)
         ):
             raise NetworkSecurityError(
                 f"SSRF / Internal network access blocked: '{hostname}' resolved to restricted IP '{ip_obj}'.",

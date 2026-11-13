@@ -104,6 +104,8 @@ class ArchiveGuard(SecureComponent):
         archive_file_size = max(1, os.path.getsize(zip_path))
         total_written = 0
         staged_pairs: List[Tuple[str, str]] = []
+        staged_dirs: List[str] = []
+        promoted_files: List[str] = []
         extracted_files: List[str] = []
 
         try:
@@ -122,8 +124,10 @@ class ArchiveGuard(SecureComponent):
                     final_dest_path = self._resolve_safe_destination(real_target, info.filename)
 
                     if info.is_dir():
+                        # Directories are created in the destination only at promotion time, so a
+                        # rejected archive leaves nothing behind in the destination.
                         os.makedirs(staged_path, mode=0o700, exist_ok=True)
-                        os.makedirs(final_dest_path, mode=0o700, exist_ok=True)
+                        staged_dirs.append(final_dest_path)
                         continue
 
                     if any(info.filename.lower().endswith(ext) for ext in self.NESTED_ARCHIVE_EXTENSIONS):
@@ -199,6 +203,8 @@ class ArchiveGuard(SecureComponent):
                     staged_pairs.append((staged_path, final_dest_path))
 
                 # Atomic promotion from staging_dir to real_target after all members pass quotas & realpath checks
+                for dir_dest_path in staged_dirs:
+                    os.makedirs(dir_dest_path, mode=0o700, exist_ok=True)
                 for staged_path, final_dest_path in staged_pairs:
                     self._verify_no_symlink_or_escape(staged_path, staging_dir)
                     dest_parent = os.path.dirname(final_dest_path)
@@ -210,17 +216,18 @@ class ArchiveGuard(SecureComponent):
                             component_id="archive_guard",
                         )
                     os.replace(staged_path, final_dest_path)
+                    promoted_files.append(final_dest_path)
                     self._verify_no_symlink_or_escape(final_dest_path, real_target)
                     os.chmod(final_dest_path, 0o600)
                     extracted_files.append(final_dest_path)
 
         except ArchiveSecurityError:
             shutil.rmtree(staging_dir, ignore_errors=True)
-            self._purge_directory_contents(real_target)
+            self._remove_promoted_files(promoted_files)
             raise
         except zipfile.BadZipFile as exc:
             shutil.rmtree(staging_dir, ignore_errors=True)
-            self._purge_directory_contents(real_target)
+            self._remove_promoted_files(promoted_files)
             raise ArchiveSecurityError(
                 f"Corrupted or malformed ZIP archive: {exc}",
                 vector_id="B.1",
@@ -303,6 +310,19 @@ class ArchiveGuard(SecureComponent):
                 component_id="archive_guard",
             )
         return candidate
+
+    @staticmethod
+    def _remove_promoted_files(promoted_files: List[str]) -> None:
+        """Roll back a rejected extraction: remove only the files this extraction itself promoted.
+
+        Files that were already in the destination before the call are never touched, so a rejected
+        archive cannot be used to wipe a directory (for example the workspace root).
+        """
+        for promoted_path in promoted_files:
+            try:
+                os.unlink(promoted_path)
+            except OSError:
+                continue
 
     @staticmethod
     def _purge_directory_contents(real_target: str) -> None:
