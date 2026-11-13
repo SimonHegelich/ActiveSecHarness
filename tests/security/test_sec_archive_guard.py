@@ -116,3 +116,34 @@ def test_sec_archive_atomic_staging_and_symlink_target_rejection(tmp_path: os.Pa
     assert len(extracted) == 1
     assert not any(name.startswith(".staging_") for name in os.listdir(real_dir))
 
+
+
+@pytest.mark.security
+def test_sec_rejected_archive_does_not_delete_existing_destination_files(tmp_path: os.PathLike[str]) -> None:
+    """[Vector B.2: Zip-Slip Rollback] Rejecting an archive removes nothing that was already in the destination directory."""
+    dest_dir = os.path.join(str(tmp_path), "data")
+    os.makedirs(os.path.join(dest_dir, "reports"))
+    with open(os.path.join(dest_dir, "important.csv"), "w", encoding="utf-8") as fh:
+        fh.write("a,b\n1,2\n")
+    with open(os.path.join(dest_dir, "reports", "q1.txt"), "w", encoding="utf-8") as fh:
+        fh.write("results\n")
+
+    zip_path = os.path.join(str(tmp_path), "bad.zip")
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("ok.txt", "fine")
+        zf.writestr("newdir/", "")
+        zf.writestr("../../evil.sh", "#!/bin/sh\n")
+
+    with pytest.raises(ArchiveSecurityError):
+        ArchiveGuard().safe_extract_zip(zip_path, dest_dir)
+
+    # Pre-existing content is untouched, and nothing of the rejected archive is left behind.
+    assert sorted(os.listdir(dest_dir)) == ["important.csv", "reports"]
+    assert os.path.exists(os.path.join(dest_dir, "reports", "q1.txt"))
+
+    not_a_zip = os.path.join(str(tmp_path), "notzip.zip")
+    with open(not_a_zip, "w", encoding="utf-8") as fh:
+        fh.write("this is not a zip archive\n")
+    with pytest.raises(ArchiveSecurityError):
+        ArchiveGuard().safe_extract_zip(not_a_zip, dest_dir)
+    assert sorted(os.listdir(dest_dir)) == ["important.csv", "reports"]
