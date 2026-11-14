@@ -12,10 +12,10 @@
 | **Title** | Ring-1 Social-Engineering De-Obfuscator & Sudo Risk Explainer |
 | **Privilege Ring** | **Ring 1** |
 | **Mitigated Threat Vectors** | `B.4`, `F.1`, `A.1` |
-| **Source File** | [`src/activesec/sovereign/deobfuscator.py`](../../src/activesec/sovereign/deobfuscator.py) (`sha256:16d147edb9a0`) |
+| **Source File** | [`src/activesec/sovereign/deobfuscator.py`](../../src/activesec/sovereign/deobfuscator.py) (`sha256:49f4506b0a2f`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_deobfuscator.py`](../../tests/security/test_sec_deobfuscator.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
-| **Adversarial Security Verification** | **VERIFIED (PASS)** (3 test vectors) |
+| **Adversarial Security Verification** | **VERIFIED (PASS)** (4 test vectors) |
 
 ---
 
@@ -40,6 +40,7 @@ Protects the human operator during sudo ceremonies by detecting Trojan Source in
 | `test_sec_trojan_source_unicode_bidi_blocked` | [Vector B.4: Trojan Source CVE-2021-42574] Immediately blocks invisible Unicode Bidi overrides. | **PASS** |
 | `test_sec_base64_obfuscated_reverse_shell_exposed_and_blocked` | [Vector F.1: Deceptive UI / Base64 Obfuscation] Decodes Base64 payload and triggers CRITICAL alert. | **PASS** |
 | `test_sec_sensitive_ssh_and_docker_socket_flagged_critical` | [Vector A.4 & E.1: Host Persistence & Escape] Flags access to ~/.ssh and docker.sock as CRITICAL. | **PASS** |
+| `test_sec_printf_base64_and_indirect_shell_pipelines_blocked` | [Vector F.1 & A.1: Indirect Pipe-to-Shell & printf Obfuscation] Blocks printf base64 pipelines, rev | sh, and xargs sh. | **PASS** |
 
 ---
 

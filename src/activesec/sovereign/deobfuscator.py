@@ -51,13 +51,13 @@ class CommandDeobfuscator(SecureComponent):
     """Ring-1 analyzer that de-obfuscates commands and flags social-engineering traps before sudo."""
 
     _BASE64_PIPE_PATTERN = re.compile(
-        r"(?:echo|printf)\s+['\"]?([A-Za-z0-9+/=]{8,})['\"]?\s*\|\s*(?:base64\s+(?:-d|--decode)|openssl\s+enc\s+-d\s+-base64)"
+        r"(?:echo|printf(?:\s+['\"][^'\"]*['\"])?)\s+['\"]?([A-Za-z0-9+/=]{8,})['\"]?\s*\|\s*(?:base64\s+(?:-d|--decode)|openssl\s+enc\s+-d\s+-base64)"
     )
     _HEX_PIPE_PATTERN = re.compile(
-        r"(?:echo|printf)\s+['\"]?([0-9a-fA-F]{8,})['\"]?\s*\|\s*xxd\s+-r\s+-p"
+        r"(?:echo|printf(?:\s+['\"][^'\"]*['\"])?)\s+['\"]?([0-9a-fA-F]{8,})['\"]?\s*\|\s*xxd\s+-r\s+-p"
     )
     _PIPE_TO_SHELL_PATTERN = re.compile(
-        r"(?:curl|wget|fetch)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|da|k)?sh\b"
+        r"(?:(?:curl|wget|fetch)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|da|k)?sh\b|\|\s*(?:xargs\b[^\n|]*\b(?:ba|z|da|k)?sh\b|rev\s*\|\s*(?:ba|z|da|k)?sh\b|(?:ba|z|da|k)?sh\b))"
     )
     _INSECURE_TLS_FLAG_PATTERN = re.compile(
         r"\b(?:curl\s+[^;|]*?(?:-k|--insecure)|wget\s+[^;|]*?--no-check-certificate|NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*0)\b"
