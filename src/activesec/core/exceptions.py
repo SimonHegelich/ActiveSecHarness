@@ -28,6 +28,10 @@ class AuditIntegrityError(ActiveSecError):
     """Raised when tampering, deletion, reordering, or signature forgery is detected in the audit log."""
 
 
+class AuditChainTamperError(AuditIntegrityError):
+    """Raised when hash-chain tampering, tail truncation, or rollback is detected in the audit log."""
+
+
 class ArchiveSecurityError(ActiveSecError):
     """Raised when an archive triggers decompression bomb, Zip-Slip, or special-file guards."""
 

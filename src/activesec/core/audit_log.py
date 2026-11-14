@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Tuple
 
 from activesec.core.component import ComponentSecurityAssessment, SecureComponent
-from activesec.core.exceptions import AuditIntegrityError
+from activesec.core.exceptions import AuditChainTamperError, AuditIntegrityError
 from activesec.sovereign.deobfuscator import TROJAN_SOURCE_UNICODE_CHARS
 
 
@@ -84,6 +84,12 @@ class AuditLogEntry:
     entry_hash: str
     hmac_signature: str
     encrypted_payload: str = ""
+    vendor_hmac: str = ""
+
+    @property
+    def operator_hmac(self) -> str:
+        """Return the Ring-0 operator HMAC-SHA256 signature over ``entry_hash``."""
+        return self.hmac_signature
 
     def tier1_header_dict(self) -> Dict[str, object]:
         """Return the Tier-1 public structural header fields safe for real-time telemetry."""
@@ -97,6 +103,7 @@ class AuditLogEntry:
             "sequence_id": self.sequence_id,
             "timestamp_unix": round(self.timestamp_unix, 6),
             "vector_id": self.vector_id,
+            "vendor_hmac": self.vendor_hmac,
         }
 
     def canonical_payload_bytes(self) -> bytes:
@@ -159,13 +166,26 @@ class HashChainedAuditLog(SecureComponent):
         self,
         signing_key: Optional[bytes] = None,
         *,
+        operator_secret: Optional[bytes] = None,
+        vendor_secret: Optional[bytes] = None,
         encryption_key: Optional[bytes] = None,
         redaction_salt: Optional[bytes] = None,
     ) -> None:
-        self._signing_key: bytes = signing_key if signing_key is not None else secrets.token_bytes(32)
+        primary_key = signing_key if signing_key is not None else operator_secret
+        self._signing_key: bytes = bytes(primary_key) if primary_key is not None else secrets.token_bytes(32)
+        self._operator_secret: bytes = self._signing_key
         if len(self._signing_key) < 32:
             raise AuditIntegrityError(
                 "Audit log signing key must be at least 32 bytes.",
+                vector_id="A.3",
+                component_id="audit_log",
+            )
+        self._vendor_secret: bytes = (
+            bytes(vendor_secret) if vendor_secret is not None else secrets.token_bytes(32)
+        )
+        if len(self._vendor_secret) < 32:
+            raise AuditIntegrityError(
+                "Audit log vendor secret must be at least 32 bytes.",
                 vector_id="A.3",
                 component_id="audit_log",
             )
@@ -176,16 +196,16 @@ class HashChainedAuditLog(SecureComponent):
                 component_id="audit_log",
             )
         self._encryption_key: bytes = (
-            encryption_key
+            bytes(encryption_key)
             if encryption_key is not None
             else hmac.new(self._signing_key, b"activesec.audit.tier2.encryption.v1", hashlib.sha256).digest()
         )
         self._redaction_salt: bytes = (
-            redaction_salt
+            bytes(redaction_salt)
             if redaction_salt is not None
             else hmac.new(self._signing_key, b"activesec.audit.redaction.salt.v1", hashlib.sha256).digest()
         )
-        self._key_custody_mode: str = "external_supplied" if signing_key is not None else "ephemeral_ring0_memory"
+        self._key_custody_mode: str = "external_supplied" if primary_key is not None else "ephemeral_ring0_memory"
         self._entries: List[AuditLogEntry] = []
 
     @property
@@ -211,10 +231,11 @@ class HashChainedAuditLog(SecureComponent):
             ),
             enforced_invariants=(
                 "Every entry hashes its canonical payload together with prev_entry_hash (starting from a fixed 64-zero genesis hash).",
-                "Every entry is authenticated with a >=256-bit Ring-0 HMAC-SHA256 signature over entry_hash.",
+                "Every entry is authenticated with dual-key split-horizon HMAC-SHA256 signatures (operator_hmac and distinct vendor_hmac) over entry_hash.",
                 "Two-stage pre-logging sanitization scrubs passwords, API keys, PEM keys, Bearer/Basic tokens, CLI secret flags, and high-entropy secrets into deterministic <REDACTED:TYPE:hmac_10chars> fingerprints before storage or hashing.",
                 "All logged strings strip ANSI escape sequences, null bytes, C0/C1 control characters, and Trojan Source Unicode codepoints to prevent log injection and terminal hijacking.",
                 "Tier-2 forensic details are sealed with per-entry HKDF-HMAC-SHA256 stream encryption and Encrypt-then-MAC authentication tags so exported JSONL and disk vaults never expose cleartext vulnerability or path blueprints.",
+                "Detects tail truncation and rollback when verify_chain() is anchored against expected_min_entries or expected_head_hash.",
                 "Physical vault writes enforce 0o700 directory and 0o600 file permissions atomically while rejecting symlinks and group/world-accessible files.",
             ),
             residual_risks=(
@@ -571,6 +592,11 @@ class HashChainedAuditLog(SecureComponent):
             entry_hash.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
+        vendor_sig = hmac.new(
+            self._vendor_secret,
+            entry_hash.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
         final_entry = AuditLogEntry(
             sequence_id=seq_id,
@@ -584,24 +610,42 @@ class HashChainedAuditLog(SecureComponent):
             entry_hash=entry_hash,
             hmac_signature=signature,
             encrypted_payload=encrypted_payload,
+            vendor_hmac=vendor_sig,
         )
         self._entries.append(final_entry)
         return final_entry
 
-    def verify_chain(self, external_entries: Optional[Tuple[AuditLogEntry, ...]] = None) -> bool:
-        """Verify cryptographic integrity, sequence continuity, HMAC signatures, and Tier-2 sealing."""
+    @property
+    def head_hash(self) -> str:
+        """Return the ``entry_hash`` of the latest entry, or ``GENESIS_PREV_HASH`` if empty."""
+        return self._entries[-1].entry_hash if self._entries else GENESIS_PREV_HASH
+
+    def verify_chain(
+        self,
+        external_entries: Optional[Tuple[AuditLogEntry, ...]] = None,
+        *,
+        expected_min_entries: Optional[int] = None,
+        expected_head_hash: Optional[str] = None,
+    ) -> bool:
+        """Verify cryptographic integrity, sequence continuity, HMAC signatures, Tier-2 sealing, and tail anchors."""
         chain = external_entries if external_entries is not None else tuple(self._entries)
+        if expected_min_entries is not None and len(chain) < expected_min_entries:
+            raise AuditChainTamperError(
+                f"Audit log tail truncation detected: expected at least {expected_min_entries} entries, found {len(chain)}.",
+                vector_id="A.3",
+                component_id="audit_log",
+            )
         expected_prev_hash = GENESIS_PREV_HASH
 
         for expected_seq, entry in enumerate(chain):
             if entry.sequence_id != expected_seq:
-                raise AuditIntegrityError(
+                raise AuditChainTamperError(
                     f"Audit log sequence gap or reordering at index {expected_seq} (found sequence_id={entry.sequence_id}).",
                     vector_id="A.3",
                     component_id="audit_log",
                 )
             if not hmac.compare_digest(entry.prev_entry_hash, expected_prev_hash):
-                raise AuditIntegrityError(
+                raise AuditChainTamperError(
                     f"Broken hash chain at sequence_id={entry.sequence_id}: prev_entry_hash mismatch.",
                     vector_id="A.3",
                     component_id="audit_log",
@@ -609,7 +653,7 @@ class HashChainedAuditLog(SecureComponent):
 
             recomputed_hash = hashlib.sha256(entry.canonical_payload_bytes()).hexdigest()
             if not hmac.compare_digest(entry.entry_hash, recomputed_hash):
-                raise AuditIntegrityError(
+                raise AuditChainTamperError(
                     f"Entry payload tampered at sequence_id={entry.sequence_id}: entry_hash mismatch.",
                     vector_id="A.3",
                     component_id="audit_log",
@@ -621,22 +665,42 @@ class HashChainedAuditLog(SecureComponent):
                 hashlib.sha256,
             ).hexdigest()
             if not hmac.compare_digest(entry.hmac_signature, expected_sig):
-                raise AuditIntegrityError(
+                raise AuditChainTamperError(
                     f"Forged HMAC signature at sequence_id={entry.sequence_id}.",
                     vector_id="A.3",
                     component_id="audit_log",
                 )
 
+            if entry.vendor_hmac:
+                expected_vendor_sig = hmac.new(
+                    self._vendor_secret,
+                    recomputed_hash.encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
+                if not hmac.compare_digest(entry.vendor_hmac, expected_vendor_sig):
+                    raise AuditChainTamperError(
+                        f"Forged vendor HMAC signature at sequence_id={entry.sequence_id}.",
+                        vector_id="A.3",
+                        component_id="audit_log",
+                    )
+
             if entry.encrypted_payload:
                 decrypted = self.decrypt_entry_details(entry)
                 if dict(entry.details) != decrypted:
-                    raise AuditIntegrityError(
+                    raise AuditChainTamperError(
                         f"Tier-2 decrypted payload mismatch at sequence_id={entry.sequence_id}.",
                         vector_id="A.3",
                         component_id="audit_log",
                     )
 
             expected_prev_hash = entry.entry_hash
+
+        if expected_head_hash is not None and not hmac.compare_digest(expected_prev_hash, expected_head_hash):
+            raise AuditChainTamperError(
+                f"Audit log head hash mismatch (tail truncation or rollback detected): expected {expected_head_hash}, found {expected_prev_hash}.",
+                vector_id="A.3",
+                component_id="audit_log",
+            )
 
         return True
 

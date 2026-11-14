@@ -304,3 +304,35 @@ def test_sec_audit_log_vault_0600_permissions_and_symlink_defense(tmp_path: Path
             extra_ro_binds=[str(vault_path)],
         )
     assert sb_exc.value.vector_id == "E.1"
+
+
+@pytest.mark.security
+def test_sec_audit_log_dual_key_split_horizon_default_and_tail_truncation_detection() -> None:
+    """[Vector A.3: Split-Horizon Dual-Key & Tail Truncation] Default vendor_secret is distinct from operator signing key, and tail truncation is caught against expected_min_entries / expected_head_hash."""
+    from activesec.core.exceptions import AuditChainTamperError
+
+    log = HashChainedAuditLog()
+    assert log._vendor_secret != log._operator_secret
+
+    e0 = log.append_event(event_type="SUDO_GRANT", actor_id="operator", ring_level=1)
+    e1 = log.append_event(event_type="TOOL_CALL_ALLOWED", actor_id="agent-1", ring_level=2)
+    e2 = log.append_event(event_type="TOOL_CALL_BLOCKED", actor_id="agent-1", ring_level=2, vector_id="F.2")
+
+    # Genuine dual-key separation: operator_hmac and vendor_hmac are distinct
+    assert e0.operator_hmac != e0.vendor_hmac
+    assert e2.operator_hmac != e2.vendor_hmac
+
+    anchored_count = len(log.entries)
+    anchored_head = log.head_hash
+    assert log.verify_chain(expected_min_entries=anchored_count, expected_head_hash=anchored_head) is True
+
+    # Attacker truncates the tail entry (e2) to hide the blocked attack
+    truncated_chain = (e0, e1)
+    with pytest.raises(AuditChainTamperError) as exc_count:
+        log.verify_chain(truncated_chain, expected_min_entries=anchored_count)
+    assert exc_count.value.vector_id == "A.3"
+
+    with pytest.raises(AuditChainTamperError) as exc_head:
+        log.verify_chain(truncated_chain, expected_head_hash=anchored_head)
+    assert exc_head.value.vector_id == "A.3"
+
