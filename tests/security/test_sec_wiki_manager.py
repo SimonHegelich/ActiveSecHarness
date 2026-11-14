@@ -79,11 +79,17 @@ def test_sec_wiki_manager_detects_component_sha256_tampering_and_outside_root(tm
 
 
 @pytest.mark.security
-def test_sec_wiki_manager_rejects_tampered_audit_log_and_syncs_runtime_telemetry(tmp_path: Path) -> None:
+def test_sec_wiki_manager_rejects_tampered_audit_log_and_syncs_runtime_telemetry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """[Vector A.3 & F.3: Runtime Telemetry & Audit Verification] Rejects tampered audit chains and automatically syncs AgentLoop runtime telemetry."""
     repo_root = Path(__file__).resolve().parents[2]
-    test_wiki_dir = repo_root / "wiki"
-    manager = WikiManager(repo_root=repo_root, wiki_dir=test_wiki_dir)
+    test_wiki_dir = tmp_path / "wiki_sandbox"
+    test_wiki_dir.mkdir()
+    # Allow test_wiki_dir inside tmp_path by initializing WikiManager against repo_root and redirecting _wiki_dir
+    manager = WikiManager(repo_root=repo_root, wiki_dir=repo_root / "wiki")
+    monkeypatch.setattr(manager, "_wiki_dir", test_wiki_dir)
 
     # 1. Tampered audit log must be rejected by collect_runtime_telemetry
     bad_log = HashChainedAuditLog()
@@ -169,3 +175,51 @@ def test_sec_wiki_manager_rejects_tampered_audit_log_and_syncs_runtime_telemetry
     assert latest.session_label == "agent_loop:telemetry-agent"
     assert latest.allowed_tool_calls == 1
     assert latest.audit_chain_verified is True
+
+
+@pytest.mark.security
+def test_sec_wiki_never_reports_verified_for_tests_that_were_not_run() -> None:
+    """[Vector A.3: Ledger Integrity] The ledger says VERIFIED with a real pass count only for tests executed in that sync."""
+    from activesec.core.component import ComponentSecurityAssessment
+    from activesec.core.wiki_manager import ComponentVerificationResult, TestCaseInfo
+
+    assessment = ComponentSecurityAssessment(
+        component_id="demo_guard",
+        title="Demo",
+        ring_level=0,
+        source_path="src/demo.py",
+        security_test_path="tests/security/test_sec_demo.py",
+        threat_vectors=("A.1",),
+        summary="demo",
+        enforced_invariants=("demo",),
+        residual_risks=("demo",),
+    )
+
+    def result(*, executed: bool, passed: tuple[bool, ...]) -> ComponentVerificationResult:
+        return ComponentVerificationResult(
+            assessment=assessment,
+            source_sha256="ab" * 32,
+            ast_safe=True,
+            ast_findings=(),
+            test_cases=tuple(TestCaseInfo(name=f"test_sec_{i}", docstring="d", passed=p) for i, p in enumerate(passed)),
+            all_tests_passed=all(passed),
+            tests_executed=executed,
+        )
+
+    # Runtime sync: tests only discovered. Nothing may be reported as verified or passed.
+    not_run = result(executed=False, passed=(True, True))
+    ledger = WikiManager.render_security_ledger([not_run])
+    page = WikiManager.render_component_wiki_page(not_run)
+    assert "**NOT RUN**" in ledger and "VERIFIED" not in ledger and "passed)" not in ledger
+    assert "TESTS NOT RUN IN THIS SYNC" in ledger
+    assert "NOT RUN IN THIS SYNC" in page and "**PASS**" not in page
+
+    # Full sync with one failing test: the real count is shown, not n/n.
+    one_failed = result(executed=True, passed=(True, False))
+    ledger = WikiManager.render_security_ledger([one_failed])
+    assert "**FAILED** (1/2 passed)" in ledger and "ATTENTION REQUIRED" in ledger
+
+    all_passed = result(executed=True, passed=(True, True))
+    ledger = WikiManager.render_security_ledger([all_passed])
+    assert "**VERIFIED** (2/2 passed)" in ledger and "ALL COMPONENTS VERIFIED" in ledger
+
