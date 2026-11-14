@@ -65,3 +65,24 @@ def test_sec_bidirectional_secret_redaction_and_egress_block() -> None:
     with pytest.raises(CredentialSecurityError) as exc_info:
         guard.assert_no_cleartext_secrets(leaked_text)
     assert exc_info.value.vector_id == "D.2"
+
+
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "secret_assignment",
+    [
+        "AWS_" + "SECRET_ACCESS_KEY=" + ("b" * 40),
+        "aws_" + "secret_access_key: '" + ("Z" * 32) + "'",
+        "access_token=" + ("t" * 24),
+        "private_key = '" + ("p" * 20) + "'",
+    ],
+)
+def test_sec_cloud_and_unquoted_secret_assignments_blocked(secret_assignment: str) -> None:
+    """[Vector D.2: Secret Leakage / DLP] Blocks quoted and unquoted cloud secret key assignments."""
+    guard = CredentialGuard()
+    with pytest.raises(CredentialSecurityError) as exc_info:
+        guard.assert_no_cleartext_secrets(secret_assignment)
+    assert exc_info.value.vector_id == "D.2"
+    redacted = guard.redact_secrets(secret_assignment)
+    assert "<REDACTED:" in redacted
+

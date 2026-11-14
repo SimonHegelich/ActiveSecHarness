@@ -109,8 +109,9 @@ class CredentialGuard(SecureComponent):
         ("OPENAI_KEY", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b")),
         ("GITHUB_TOKEN", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b")),
         ("AWS_ACCESS_KEY", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+        ("AWS_SECRET_KEY", re.compile(r"(?i)\baws_secret_access_key\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{16,}['\"]?")),
         ("SLACK_TOKEN", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b")),
-        ("GENERIC_ASSIGNMENT", re.compile(r"(?i)\b(?:api_key|secret_key|password|passwd|access_token|auth_token)\s*[:=]\s*['\"]([^'\"]{8,})['\"]")),
+        ("GENERIC_ASSIGNMENT", re.compile(r"(?i)\b(?:(?:api_key|secret_key|aws_secret_access_key|access_token|auth_token|private_key)\s*[:=]\s*['\"]?[A-Za-z0-9_\-/+=]{12,}['\"]?|(?:password|passwd)\s*[:=]\s*['\"]([^'\"]{8,})['\"])")),
     )
 
     def __init__(
@@ -140,7 +141,7 @@ class CredentialGuard(SecureComponent):
                 "CSPRNG secret generation, and bidirectional cleartext secret redaction."
             ),
             enforced_invariants=(
-                "Rejects any password shorter than min_length (14), below min_shannon_bits (52.0), or with fewer than 3 character classes.",
+                "Rejects any password shorter than min_length (14), below min_shannon_bits (56.0) or min_bits_per_char (4.0), or with fewer than 3 character classes.",
                 "Reverses Leet-speak substitutions (0->o, 1->i/l, 3->e, 4->a, @->a, $->s) and strips digit/symbol affixes before matching against compromised dictionaries and project context words.",
                 "Rejects keyboard walks (qwerty/qwertz/123456) and repeated character sequences.",
                 "Redacts PEM private keys, API tokens (OpenAI, GitHub, AWS, Slack), and secret assignments into deterministic <REDACTED:TYPE:HASH8> placeholders.",
