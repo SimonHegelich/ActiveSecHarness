@@ -107,3 +107,25 @@ def test_sec_gtfobins_disallowed_binary_flags_blocked(
         guard.run_sandboxed(disallowed_argv, workspace_dir=str(tmp_path))
     assert exc_info.value.vector_id == "E.3"
 
+
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "abbreviated_argv",
+    [
+        ["tar", "-cf", "out.tar", ".", "--checkpoint=1", "--checkpoint-act=exec=sh"],
+        ["tar", "-xf", "in.tar", "--to-comm=sh"],
+        ["tar", "-cf", "out.tar", "--use-compress-prog=sh", "."],
+        ["pytest", "--override=console_output_style=classic"],
+    ],
+)
+def test_sec_abbreviated_gnu_long_options_blocked(
+    tmp_path: os.PathLike[str],
+    abbreviated_argv: list[str],
+) -> None:
+    """[Vector E.3: Disallowed Binary Flags] An unambiguous abbreviation of a forbidden long option is refused like the full flag."""
+    guard = SandboxGuard(SandboxPolicy(allowed_binaries=frozenset({"tar", "pytest"})))
+    with pytest.raises(SandboxSecurityError) as exc_info:
+        guard.run_sandboxed(abbreviated_argv, workspace_dir=str(tmp_path))
+    assert exc_info.value.vector_id == "E.3"
+
+

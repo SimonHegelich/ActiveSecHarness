@@ -6,7 +6,9 @@ Executes untrusted or agent-initiated subprocesses inside an isolated Linux name
 - Unmounted host home directory (`~/.ssh`, `~/.aws` are invisible inside the sandbox).
 - Read-only system binary mounts (`/usr`, `/bin`, `/lib`, `/lib64`).
 - isolated `/tmp` tmpfs and offline network namespace (`--unshare-net`) by default.
-- RLIMIT process/memory/file-size quotas against fork bombs and disk exhaustion.
+- RLIMIT memory/file-size/CPU-time quotas against memory and disk exhaustion. A process-count
+  limit (RLIMIT_NPROC) is applied only when ``SandboxPolicy.max_processes >= 512``, because the
+  limit is per user ID on Linux; with the default value (64) no process-count limit is set.
 """
 
 from __future__ import annotations
@@ -61,7 +63,7 @@ class SandboxPolicy:
     allowed_binaries: FrozenSet[str] = frozenset({"python3", "pytest", "git", "ls", "cat", "echo", "sh"})
     allow_network: bool = False
     timeout_seconds: float = 10.0
-    max_processes: int = 64
+    max_processes: int = 64                        # RLIMIT_NPROC is applied only for values >= 512 (per-UID limit)
     max_memory_bytes: int = 512 * 1024 * 1024      # 512 MB address space limit
     max_file_size_bytes: int = 50 * 1024 * 1024    # 50 MB max single file write
     require_bwrap: bool = False                    # Auto-uses bwrap when available and permitted by kernel
@@ -99,8 +101,8 @@ class SandboxGuard(SecureComponent):
             summary=(
                 "Isolates all agent subprocess executions using clean-room environment scrubbing, "
                 "binary allowlisting, bubblewrap (bwrap) Linux namespaces (--unshare-all, --die-with-parent), "
-                "unmounted host home directories, and OS resource limits (RLIMIT_NPROC, RLIMIT_FSIZE) "
-                "against fork bombs and container escapes."
+                "unmounted host home directories, and OS resource limits (RLIMIT_FSIZE, RLIMIT_AS, RLIMIT_CPU; "
+                "RLIMIT_NPROC only when max_processes >= 512) against resource exhaustion and container escapes."
             ),
             enforced_invariants=(
                 "Never executes commands with shell=True; requires an explicit sequence of arguments.",
@@ -108,6 +110,7 @@ class SandboxGuard(SecureComponent):
                 "Blocks mounting of sensitive host paths (/var/run/docker.sock, /etc/shadow, ~/.ssh) into the sandbox.",
                 "Builds bubblewrap command lines with --unshare-all, --die-with-parent, --new-session, read-only /usr /bin /lib, and isolated --tmpfs /tmp.",
                 "Enforces close_fds=True and hard wall-clock timeouts on every subprocess.",
+                "Refuses per-binary forbidden flags, including unambiguous GNU long-option abbreviations (e.g. --checkpoint-act for --checkpoint-action).",
             ),
             residual_risks=(
                 "Unprivileged user namespaces may be restricted by host sysctl (kernel.unprivileged_userns_clone=0); when require_bwrap=True is set, SandboxGuard fails closed rather than falling back.",
@@ -190,6 +193,23 @@ class SandboxGuard(SecureComponent):
         cmd.extend(argv)
         return tuple(cmd)
 
+    @staticmethod
+    def _matches_forbidden_flag(arg: str, flag: str) -> bool:
+        """Return True if ``arg`` selects the forbidden ``flag``.
+
+        GNU ``getopt_long`` (tar, and argparse-based tools such as pytest) accepts any unambiguous
+        prefix of a long option, so ``--checkpoint-act=exec=...`` selects ``--checkpoint-action``.
+        A long argument whose name is a prefix of a forbidden long flag is therefore refused as
+        well (fail closed: a shorter sibling option such as ``--checkpoint`` is refused too).
+        """
+        if arg == flag or arg.startswith(flag + "="):
+            return True
+        if flag.startswith("--"):
+            option_name = arg.split("=", 1)[0]
+            if len(option_name) >= 5 and flag.startswith(option_name):
+                return True
+        return False
+
     def _validate_argv_and_mounts(
         self,
         argv: Sequence[str],
@@ -217,7 +237,7 @@ class SandboxGuard(SecureComponent):
         for idx, arg in enumerate(argv[1:], start=1):
             arg_clean = arg.strip()
             for flag in forbidden_flags:
-                if arg_clean == flag or arg_clean.startswith(flag + "="):
+                if self._matches_forbidden_flag(arg_clean, flag):
                     raise SandboxSecurityError(
                         f"Disallowed GTFOBins/escape flag '{arg_clean}' on binary '{binary_name}'.",
                         vector_id="E.3",
