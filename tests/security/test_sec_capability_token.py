@@ -344,3 +344,47 @@ def test_sec_full_lineage_revocation_cascades_across_root_and_siblings(tmp_path:
         engine.verify_tool_call(token=child_b, agent_id="worker-b", tool_name="fs:write", target_path=os.path.join(ws, "out.txt"))
 
 
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "env_filename",
+    [
+        ".env",
+        ".env.local",
+        ".env.production",
+        ".env.development",
+        ".env.staging",
+        ".envrc",
+    ],
+)
+def test_sec_dotenv_local_and_envrc_protected_by_default(
+    tmp_path: os.PathLike[str],
+    env_filename: str,
+) -> None:
+    """[Vector A.4: Dotfile & Credential Protection] Blocks read/write access to .env.local, .env.*, and .envrc by default."""
+    engine = CapabilityEngine()
+    ws = str(tmp_path)
+    caveat = CapabilityCaveat(
+        allowed_tools=frozenset({"fs:read", "fs:write"}),
+        path_prefixes=(ws,),
+        max_calls=10,
+        expires_at_unix=time.time() + 300,
+    )
+    token = engine.issue_root_token(
+        subject_agent_id="coder",
+        task_purpose="Inspect workspace",
+        caveat=caveat,
+    )
+
+    target = os.path.join(ws, env_filename)
+    for tool in ("fs:read", "fs:write"):
+        with pytest.raises(CapabilityViolationError) as exc_info:
+            engine.verify_tool_call(
+                token=token,
+                agent_id="coder",
+                tool_name=tool,
+                target_path=target,
+            )
+        assert exc_info.value.vector_id == "A.4"
+
+
+

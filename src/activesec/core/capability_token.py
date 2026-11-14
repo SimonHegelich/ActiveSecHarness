@@ -277,6 +277,10 @@ class CapabilityCaveat:
     denied_paths: Tuple[str, ...] = (
         ".git/hooks",
         ".env",
+        ".env.local",
+        ".env.production",
+        ".env.development",
+        ".envrc",
         ".ssh",
         "src/activesec",
         "audit_vault",
@@ -740,10 +744,15 @@ class CapabilityEngine(SecureComponent):
                     )
                 for denied in caveat.denied_paths:
                     normalized_denied = denied.strip("/")
+                    base_target = os.path.basename(real_target)
+                    is_env_variant = normalized_denied == ".env" and (
+                        base_target.startswith(".env.") or base_target == ".envrc"
+                    )
                     if (
                         real_target.endswith(os.sep + normalized_denied)
                         or (os.sep + normalized_denied + os.sep) in (real_target + os.sep)
-                        or os.path.basename(real_target).endswith(normalized_denied)
+                        or base_target.endswith(normalized_denied)
+                        or is_env_variant
                     ):
                         raise CapabilityViolationError(
                             f"Target path '{target_path}' matches protected denied path '{denied}'.",

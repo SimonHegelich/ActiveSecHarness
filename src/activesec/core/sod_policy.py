@@ -49,6 +49,10 @@ DEFAULT_SENSITIVE_PATH_MARKERS: Tuple[str, ...] = (
     "passwd",
     "password",
     ".env",
+    ".env.local",
+    ".env.production",
+    ".env.development",
+    ".envrc",
     "id_rsa",
     "id_ed25519",
 )

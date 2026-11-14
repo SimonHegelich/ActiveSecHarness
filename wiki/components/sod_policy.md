@@ -12,7 +12,7 @@
 | **Title** | Ring-0 Workspace Provenance Ledger & Compositional Multi-Agent SoD Engine |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `C.2`, `D.2`, `F.2`, `F.3` |
-| **Source File** | [`src/activesec/core/sod_policy.py`](../../src/activesec/core/sod_policy.py) (`sha256:9660add33a73`) |
+| **Source File** | [`src/activesec/core/sod_policy.py`](../../src/activesec/core/sod_policy.py) (`sha256:343b4f54150a`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_sod_policy.py`](../../tests/security/test_sec_sod_policy.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
 | **Adversarial Security Verification** | **VERIFIED (PASS)** (6 test vectors) |

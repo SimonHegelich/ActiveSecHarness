@@ -12,7 +12,7 @@
 | **Title** | Ring-0 Namespace Sandbox, Clean-Room Environment & Resource Quota Guard |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `A.1`, `A.2`, `E.1`, `E.2`, `E.3` |
-| **Source File** | [`src/activesec/guards/sandbox_guard.py`](../../src/activesec/guards/sandbox_guard.py) (`sha256:4a6f84934302`) |
+| **Source File** | [`src/activesec/guards/sandbox_guard.py`](../../src/activesec/guards/sandbox_guard.py) (`sha256:2a3ff6428810`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_sandbox_guard.py`](../../tests/security/test_sec_sandbox_guard.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
 | **Adversarial Security Verification** | **VERIFIED (PASS)** (5 test vectors) |

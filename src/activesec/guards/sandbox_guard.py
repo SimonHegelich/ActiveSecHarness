@@ -183,8 +183,17 @@ class SandboxGuard(SecureComponent):
 
         cmd.extend(["--bind", real_ws, real_ws, "--chdir", real_ws])
 
-        # Protect .git/hooks, .env, and audit vault artifacts inside the workspace if they exist
-        for protected_rel in (".git/hooks", ".env", "audit_vault", ".audit.jsonl"):
+        # Protect .git/hooks, .env*, .envrc, and audit vault artifacts inside the workspace if they exist
+        for protected_rel in (
+            ".git/hooks",
+            ".env",
+            ".env.local",
+            ".env.production",
+            ".env.development",
+            ".envrc",
+            "audit_vault",
+            ".audit.jsonl",
+        ):
             prot_full = os.path.join(real_ws, protected_rel)
             if os.path.exists(prot_full):
                 cmd.extend(["--ro-bind", prot_full, prot_full])
