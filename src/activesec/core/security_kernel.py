@@ -10,6 +10,7 @@ Every tool invocation requested by an agent in Ring 2/3 must pass through Securi
 
 from __future__ import annotations
 
+import errno
 import os
 import shlex
 import shutil
@@ -184,10 +185,17 @@ class SecurityKernel(SecureComponent):
         raw_command = request.raw_command or request.arguments.get("command") or request.arguments.get("raw_command")
         net_dest = request.network_destination
         url_arg = request.arguments.get("url")
-        if net_dest is None and url_arg:
-            parsed_url = urllib.parse.urlsplit(url_arg)
-            if parsed_url.hostname:
-                net_dest = parsed_url.hostname.lower()
+        declared_dest_mismatch: Optional[str] = None
+        if url_arg:
+            # The token's destination list must be checked against the host that is actually
+            # validated and contacted (the URL's host), never against a separately declared field.
+            url_host = (urllib.parse.urlsplit(url_arg).hostname or "").lower()
+            if url_host:
+                if net_dest is not None and net_dest.strip().lower() != url_host:
+                    declared_dest_mismatch = (
+                        f"Declared network_destination '{net_dest}' does not match the URL host '{url_host}'."
+                    )
+                net_dest = url_host
 
         binary_name = request.binary_name
         parsed_argv: list[str] = []
@@ -227,10 +235,31 @@ class SecurityKernel(SecureComponent):
                 )
                 self._record_blocked_event(request, token=token, agent_id=agent_id, error=err)
                 raise err
-            if binary_name is None:
-                binary_name = os.path.basename(parsed_argv[0])
+            # The token's binary allowlist must be checked against the executable that is actually
+            # run (argv[0]), never against a separately declared binary_name field.
+            executed_binary = os.path.basename(parsed_argv[0])
+            if binary_name is not None and os.path.basename(binary_name) != executed_binary:
+                err = CapabilityViolationError(
+                    f"Declared binary_name '{binary_name}' does not match the command's executable '{executed_binary}'.",
+                    vector_id="A.1",
+                    component_id="security_kernel",
+                )
+                self._record_blocked_event(request, token=token, agent_id=agent_id, error=err)
+                raise err
+            binary_name = executed_binary
 
         try:
+            if declared_dest_mismatch is not None:
+                raise CapabilityViolationError(
+                    declared_dest_mismatch,
+                    vector_id="C.2",
+                    component_id="security_kernel",
+                )
+            # Resolve the target once. Every later check and the final open use this same canonical
+            # path, so a link swapped after authorization cannot redirect the access (TOCTOU).
+            if target_path is not None:
+                target_path = os.path.realpath(target_path)
+
             # 1. CanaryGuard inspection on target path and arguments
             if target_path is not None:
                 self._canary_guard.check_path_access(target_path, active_token_id=token.token_id)
@@ -301,6 +330,16 @@ class SecurityKernel(SecureComponent):
                 self._capability_engine.revoke_token(token.token_id)
             self._record_blocked_event(request, token=token, agent_id=agent_id, error=exc)
             raise
+        except (OSError, ValueError) as exc:
+            # A host-level failure (missing parent, target is a directory, NUL byte in a path, ...)
+            # must not escape unaudited: fail closed and record it like any other blocked call.
+            host_err = CapabilityViolationError(
+                f"Tool call failed closed on a host error ({type(exc).__name__}: {exc}).",
+                vector_id="A.1",
+                component_id="security_kernel",
+            )
+            self._record_blocked_event(request, token=token, agent_id=agent_id, error=host_err)
+            raise host_err from exc
 
         # 5. Record allowed action in HashChainedAuditLog
         entry = self._audit_log.append_event(
@@ -345,6 +384,41 @@ class SecurityKernel(SecureComponent):
             },
         )
 
+    @staticmethod
+    def _open_canonical_fd(real_path: str, flags: int, mode: int = 0o600) -> int:
+        """Open an already-authorized canonical path without following a link swapped in afterwards.
+
+        Verifies before ``os.open`` that the parent directory is still canonical (so a parent
+        directory swapped to a symlink cannot cause ``O_CREAT``/``O_TRUNC`` outside the workspace),
+        uses ``O_NOFOLLOW`` to refuse a symlink in the final path component, and re-checks the
+        canonical path after the open.
+        """
+        parent_dir = os.path.dirname(real_path)
+        if parent_dir and (os.path.islink(parent_dir) or os.path.realpath(parent_dir) != parent_dir):
+            raise CapabilityViolationError(
+                f"Parent directory of '{real_path}' changed or became a symbolic link after authorization (TOCTOU defense).",
+                vector_id="E.1",
+                component_id="security_kernel",
+            )
+        try:
+            fd = os.open(real_path, flags | getattr(os, "O_NOFOLLOW", 0), mode)
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                raise CapabilityViolationError(
+                    f"Target path '{real_path}' became a symbolic link after authorization (TOCTOU defense).",
+                    vector_id="E.1",
+                    component_id="security_kernel",
+                ) from exc
+            raise
+        if os.path.realpath(real_path) != real_path:
+            os.close(fd)
+            raise CapabilityViolationError(
+                f"Target path '{real_path}' changed after authorization (TOCTOU defense).",
+                vector_id="E.1",
+                component_id="security_kernel",
+            )
+        return fd
+
     def _dispatch_tool(
         self,
         *,
@@ -362,9 +436,14 @@ class SecurityKernel(SecureComponent):
                     vector_id="A.3",
                     component_id="security_kernel",
                 )
-            real_path = os.path.realpath(target_path)
-            self._malware_guard.scan_file(real_path)
-            with open(real_path, "r", encoding="utf-8", errors="replace") as fh:
+            real_path = target_path
+            read_fd = self._open_canonical_fd(real_path, os.O_RDONLY)
+            try:
+                self._malware_guard.scan_file(real_path)
+            except BaseException:
+                os.close(read_fd)
+                raise
+            with os.fdopen(read_fd, "r", encoding="utf-8", errors="replace") as fh:
                 raw_text = fh.read()
             self._canary_guard.check_stream_for_canaries(raw_text, active_token_id=token.token_id)
             redacted = self._credential_guard.redact_secrets(raw_text)
@@ -390,9 +469,10 @@ class SecurityKernel(SecureComponent):
             self._canary_guard.check_stream_for_canaries(content, active_token_id=token.token_id)
             self._credential_guard.assert_no_cleartext_secrets(content)
 
-            real_path = os.path.realpath(target_path)
+            real_path = target_path
             os.makedirs(os.path.dirname(real_path), mode=0o700, exist_ok=True)
-            with open(real_path, "w", encoding="utf-8") as fh:
+            write_fd = self._open_canonical_fd(real_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+            with os.fdopen(write_fd, "w", encoding="utf-8") as fh:
                 fh.write(content)
             os.chmod(real_path, 0o600)
 
@@ -441,7 +521,7 @@ class SecurityKernel(SecureComponent):
                         explicit_class=information_class or InformationClass.UNTRUSTED,
                     )
             except ActiveSecError:
-                shutil.rmtree(real_dest, ignore_errors=True)
+                self._archive_guard._remove_promoted_files(extracted_files)
                 raise
             return (f"Extracted and verified {len(extracted_files)} files into {real_dest}", False)
 
