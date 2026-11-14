@@ -106,11 +106,12 @@ class CredentialGuard(SecureComponent):
 
     _SECRET_PATTERNS: Tuple[Tuple[str, re.Pattern[str]], ...] = (
         ("PEM_PRIVATE_KEY", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |)?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA |)?PRIVATE KEY-----")),
-        ("OPENAI_KEY", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b")),
+        ("OPENAI_KEY", re.compile(r"\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}\b")),
         ("GITHUB_TOKEN", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b")),
         ("AWS_ACCESS_KEY", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
         ("AWS_SECRET_KEY", re.compile(r"(?i)\baws_secret_access_key\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{16,}['\"]?")),
         ("SLACK_TOKEN", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b")),
+        ("JWT_TOKEN", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")),
         ("GENERIC_ASSIGNMENT", re.compile(r"(?i)\b(?:(?:api_key|secret_key|aws_secret_access_key|access_token|auth_token|private_key)\s*[:=]\s*['\"]?[A-Za-z0-9_\-/+=]{12,}['\"]?|(?:password|passwd)\s*[:=]\s*['\"]([^'\"]{8,})['\"])")),
     )
 
@@ -144,7 +145,7 @@ class CredentialGuard(SecureComponent):
                 "Rejects any password shorter than min_length (14), below min_shannon_bits (56.0) or min_bits_per_char (4.0), or with fewer than 3 character classes.",
                 "Reverses Leet-speak substitutions (0->o, 1->i/l, 3->e, 4->a, @->a, $->s) and strips digit/symbol affixes before matching against compromised dictionaries and project context words.",
                 "Rejects keyboard walks (qwerty/qwertz/123456) and repeated character sequences.",
-                "Redacts PEM private keys, API tokens (OpenAI, GitHub, AWS, Slack), and secret assignments into deterministic <REDACTED:TYPE:HASH8> placeholders.",
+                "Redacts PEM private keys, API tokens (OpenAI/Anthropic, GitHub, AWS, Slack), JWT tokens (eyJ<header>.eyJ<payload>.<sig>), and secret assignments into deterministic <REDACTED:TYPE:HASH8> placeholders.",
             ),
             residual_risks=(
                 "Custom offline wordlists beyond the built-in + configured bloom/set dictionary require mounting external wordlist files in production.",

@@ -86,3 +86,29 @@ def test_sec_cloud_and_unquoted_secret_assignments_blocked(secret_assignment: st
     redacted = guard.redact_secrets(secret_assignment)
     assert "<REDACTED:" in redacted
 
+
+@pytest.mark.security
+def test_sec_jwt_tokens_redacted_and_blocked_while_benign_dotted_identifiers_pass() -> None:
+    """[Vector D.2: Secret Leakage / DLP] Scrubs and blocks JWT tokens while leaving benign dotted identifiers untouched."""
+    guard = CredentialGuard()
+    jwt_hdr = "eyJ" + "hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+    jwt_pay = "eyJ" + "zdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ"
+    jwt_sig = "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+    sample_jwt = f"{jwt_hdr}.{jwt_pay}.{jwt_sig}"
+
+    payload = f"Authorization: Bearer {sample_jwt}\nmodule=activesec.guards.credential_guard"
+    redacted = guard.redact_secrets(payload)
+    assert sample_jwt not in redacted
+    assert "<REDACTED:JWT_TOKEN:" in redacted
+    assert "activesec.guards.credential_guard" in redacted
+
+    with pytest.raises(CredentialSecurityError) as exc_info:
+        guard.assert_no_cleartext_secrets(payload)
+    assert exc_info.value.vector_id == "D.2"
+
+    # Benign dotted identifiers and version numbers must pass without false positives
+    benign_text = "import activesec.core.security_kernel\nversion = 'v1.2026.11'\nconfig.app.name = 'demo'"
+    guard.assert_no_cleartext_secrets(benign_text)
+    assert guard.redact_secrets(benign_text) == benign_text
+
+

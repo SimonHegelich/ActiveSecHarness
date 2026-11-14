@@ -12,10 +12,10 @@
 | **Title** | Ring-0 Password Entropy, Dictionary Defense & Secret DLP Guard |
 | **Privilege Ring** | **Ring 0** |
 | **Mitigated Threat Vectors** | `D.1`, `D.2`, `D.3` |
-| **Source File** | [`src/activesec/guards/credential_guard.py`](../../src/activesec/guards/credential_guard.py) (`sha256:6cb410bdfe4b`) |
+| **Source File** | [`src/activesec/guards/credential_guard.py`](../../src/activesec/guards/credential_guard.py) (`sha256:05c699b9dc53`) |
 | **Dedicated Security Test Suite** | [`tests/security/test_sec_credential_guard.py`](../../tests/security/test_sec_credential_guard.py) |
 | **AST Static Safety Audit** | **CLEAN (Zero Forbidden Primitives)** |
-| **Adversarial Security Verification** | **VERIFIED (PASS)** (4 test vectors) |
+| **Adversarial Security Verification** | **VERIFIED (PASS)** (5 test vectors) |
 
 ---
 
@@ -30,7 +30,7 @@ Enforces high-entropy password validation, reverse cracker de-mangling (Leet-spe
 - Rejects any password shorter than min_length (14), below min_shannon_bits (56.0) or min_bits_per_char (4.0), or with fewer than 3 character classes.
 - Reverses Leet-speak substitutions (0->o, 1->i/l, 3->e, 4->a, @->a, $->s) and strips digit/symbol affixes before matching against compromised dictionaries and project context words.
 - Rejects keyboard walks (qwerty/qwertz/123456) and repeated character sequences.
-- Redacts PEM private keys, API tokens (OpenAI, GitHub, AWS, Slack), and secret assignments into deterministic <REDACTED:TYPE:HASH8> placeholders.
+- Redacts PEM private keys, API tokens (OpenAI/Anthropic, GitHub, AWS, Slack), JWT tokens (eyJ<header>.eyJ<payload>.<sig>), and secret assignments into deterministic <REDACTED:TYPE:HASH8> placeholders.
 
 ---
 
@@ -42,6 +42,7 @@ Enforces high-entropy password validation, reverse cracker de-mangling (Leet-spe
 | `test_sec_csprng_generated_secret_passes_validation` | [Vector D.3: Cryptographic Strength] Secrets generated via CSPRNG pass all entropy and dictionary checks. | **PASS** |
 | `test_sec_bidirectional_secret_redaction_and_egress_block` | [Vector D.2: Secret Leakage / DLP] Redacts API keys and PEM blocks and blocks cleartext egress. | **PASS** |
 | `test_sec_cloud_and_unquoted_secret_assignments_blocked` | [Vector D.2: Secret Leakage / DLP] Blocks quoted and unquoted cloud secret key assignments. | **PASS** |
+| `test_sec_jwt_tokens_redacted_and_blocked_while_benign_dotted_identifiers_pass` | [Vector D.2: Secret Leakage / DLP] Scrubs and blocks JWT tokens while leaving benign dotted identifiers untouched. | **PASS** |
 
 ---
 
