@@ -151,13 +151,27 @@ class WorkspaceProvenanceLedger(SecureComponent):
         real_path = os.path.realpath(path)
         return self._file_records.get(real_path)
 
+    def _label_basis(self, real_path: str) -> str:
+        """Return the path the name markers are matched against.
+
+        For a file inside the ledger's workspace this is the path relative to the workspace root,
+        so that the names of the directories *above* the workspace (for example a temp directory
+        under ``/private/var/...`` or a home directory containing ``internal``) can never change
+        the label of every file in it. Files outside the workspace, and ledgers created without
+        a workspace, keep the canonical absolute path.
+        """
+        ws = self._workspace_dir
+        if ws is not None and (real_path == ws or real_path.startswith(ws + os.sep)):
+            return os.path.relpath(real_path, ws)
+        return real_path
+
     def get_file_label(self, path: str) -> InformationClass:
         """Return the current `InformationClass` label `\\ell(f)` for ``path``."""
         real_path = os.path.realpath(path)
         rec = self._file_records.get(real_path)
         if rec is not None:
             return rec.information_class
-        return self._infer_initial_file_label(real_path)
+        return self._infer_initial_file_label(self._label_basis(real_path))
 
     @staticmethod
     def _infer_initial_file_label(real_path: str) -> InformationClass:
@@ -310,12 +324,12 @@ class WorkspaceProvenanceLedger(SecureComponent):
             file_class = (
                 explicit_file_class
                 if explicit_file_class is not None
-                else self._infer_initial_file_label(real_path)
+                else self._infer_initial_file_label(self._label_basis(real_path))
             )
             file_comp = (
                 explicit_file_class.to_composite_label()
                 if explicit_file_class is not None
-                else self._infer_initial_composite_label(real_path)
+                else self._infer_initial_composite_label(self._label_basis(real_path))
             )
             file_effects = set()
             if file_class == InformationClass.SENSITIVE or file_comp.sensitivity == SensitivityLevel.SENSITIVE:
@@ -408,8 +422,8 @@ class WorkspaceProvenanceLedger(SecureComponent):
                 effective_comp = effective_comp.join(rec.composite_label)
                 active_effects.update(rec.origin_side_effects)
             else:
-                inferred = self._infer_initial_file_label(real_path)
-                inferred_comp = self._infer_initial_composite_label(real_path)
+                inferred = self._infer_initial_file_label(self._label_basis(real_path))
+                inferred_comp = self._infer_initial_composite_label(self._label_basis(real_path))
                 effective_class = effective_class.join(inferred)
                 effective_comp = effective_comp.join(inferred_comp)
                 if inferred == InformationClass.SENSITIVE or inferred_comp.sensitivity == SensitivityLevel.SENSITIVE:

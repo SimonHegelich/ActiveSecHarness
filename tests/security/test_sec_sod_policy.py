@@ -336,3 +336,22 @@ def test_sec_trajectory_regime_ablation_conseca_vs_product_ledger(tmp_path: Path
     assert scaling["50"]["per_step_us_median"] < 200.0
 
 
+@pytest.mark.security
+def test_sec_labels_do_not_depend_on_directories_above_the_workspace(tmp_path: Path) -> None:
+    """[Vector F.2: Provenance Labels] The names of the directories above the workspace never change the label of the files in it."""
+    for parent in ("private/var/folders", "home/dev/internal-tools", "data/external", "repos/pr_team"):
+        ws = tmp_path / parent / "ws"
+        ws.mkdir(parents=True)
+        (ws / "README.md").write_text("# demo\n", encoding="utf-8")
+        (ws / "issue_7.md").write_text("bug report\n", encoding="utf-8")
+        (ws / "secret_notes.txt").write_text("rotate monthly\n", encoding="utf-8")
+        ledger = WorkspaceProvenanceLedger(workspace_dir=str(ws))
+        assert ledger.get_file_label(str(ws / "README.md")) == InformationClass.TRUSTED
+        # Markers in the path inside the workspace still decide the label.
+        assert ledger.get_file_label(str(ws / "issue_7.md")) == InformationClass.UNTRUSTED
+        assert ledger.get_file_label(str(ws / "secret_notes.txt")) == InformationClass.SENSITIVE
+        state = ledger.record_file_read(agent_id="agent-a", path=str(ws / "README.md"))
+        assert state.information_class == InformationClass.TRUSTED
+
+
+
